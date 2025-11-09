@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1030403199802",
+    "project_id": "daligas-bfd9b",
+    "storage_bucket": "daligas-bfd9b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1030403199802:android:e6b305ca7db99e99933603",
+        "android_client_info": {
+          "package_name": "com.example.daligas"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBByTVMTJRgY9I3hmqz5ktr8nqKTAdMQGU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

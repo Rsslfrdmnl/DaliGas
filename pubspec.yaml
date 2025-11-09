@@ -1,0 +1,71 @@
+name: daligas
+description: A web and mobile-based system
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  firebase_core: ^3.3.0   
+  firebase_auth: ^5.1.4   
+  cloud_firestore: ^5.4.4
+  cloud_functions: ^5.4.4 
+  fl_chart: ^0.69.0  
+  image_picker: ^1.2.0
+  firebase_storage: ^12.1.1
+  image_cropper: ^11.0.0
+  firebase_app_check: ^0.3.1+1   
+  google_maps_flutter: ^2.13.1
+  http: ^1.5.0
+  geocoding: ^4.0.0
+  geolocator: ^14.0.2
+  firebase_messaging: ^15.2.10
+  carousel_slider: ^5.1.1
+  cached_network_image: ^3.4.1
+  intl: ^0.20.2
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.7
+  flutter_local_notifications: ^19.5.0
+  url_launcher: ^6.3.2
+  location: ^8.0.1
+  photo_view: ^0.15.0
+  permission_handler: ^12.0.1
+  rxdart: ^0.28.0
+  flutter_image_compress: ^2.4.0
+  cross_file: ^0.3.5
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/images/products/
+    - assets/fonts/
+    - assets/images/truck.png
+
+flutter_icons:
+  android: true
+  image_path: "assets/images/daligas_icon.png"
+
+flutter_native_splash:
+  color: "000000"
+  image: assets/images/daligas_splasher.png
+  android: true
+  ios: true
+
+  android_gravity: center
+  ios_content_mode: center
+
+  android_12:
+    image: assets/images/daligas_splasher.png
+    icon_background_color: "000000"
+
+
