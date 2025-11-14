@@ -1,14 +1,17 @@
-// admin_inventory_screen.dart
 import 'dart:html' as html;
 import 'dart:typed_data';
 import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:geoflutterfire_plus/geoflutterfire_plus.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:daligas/web/screens/super_admin/admin_welcome_screen.dart';
+
 import 'admin_dashboard_screen.dart';
 import 'admin_orders_screen.dart';
 import 'admin_delivery_screen.dart';
@@ -16,6 +19,18 @@ import 'admin_feedbacks_screen.dart';
 import 'admin_reports_screen.dart';
 import 'admin_settings_screen.dart';
 import 'package:uuid/uuid.dart';
+
+// -----------------------------------------------------------------------------
+//  IMPORT THE FULL-FEATURED PICKER (create this file separately)
+// -----------------------------------------------------------------------------
+import 'location_picker_screen.dart';   // <-- adjust path if needed
+// -----------------------------------------------------------------------------
+//  (Optional – only needed on mobile)
+// -----------------------------------------------------------------------------
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:google_places_flutter/google_places_flutter.dart';
+import 'package:google_places_flutter/model/prediction.dart';
 
 // === SAFE FIELD ACCESS EXTENSION ===
 extension SafeDoc on DocumentSnapshot {
@@ -96,29 +111,57 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
               ),
               Transform.translate(
                 offset: const Offset(-22, 0),
-                child: const Text("DALI GAS", style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.white)),
+                child: const Text("DALI GAS",
+                    style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white)),
               ),
             ],
           ),
           const SizedBox(height: 30),
           _SidebarItem(Icons.dashboard, "Dashboard", false, () {
-            Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminDashboardScreen(), transitionDuration: Duration.zero));
+            Navigator.pushReplacement(
+                context,
+                PageRouteBuilder(
+                    pageBuilder: (_, __, ___) => const AdminDashboardScreen(),
+                    transitionDuration: Duration.zero));
           }),
           _SidebarItem(Icons.shopping_cart, "Orders", false, () {
-            Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminOrdersScreen(), transitionDuration: Duration.zero));
+            Navigator.pushReplacement(
+                context,
+                PageRouteBuilder(
+                    pageBuilder: (_, __, ___) => const AdminOrdersScreen(),
+                    transitionDuration: Duration.zero));
           }),
           _SidebarItem(Icons.inventory, "Inventory", true, () {}),
           _SidebarItem(Icons.local_shipping, "Delivery Management", false, () {
-            Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminDeliveryScreen(), transitionDuration: Duration.zero));
+            Navigator.pushReplacement(
+                context,
+                PageRouteBuilder(
+                    pageBuilder: (_, __, ___) => const AdminDeliveryScreen(),
+                    transitionDuration: Duration.zero));
           }),
           _SidebarItem(Icons.feedback, "Feedback", false, () {
-            Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminFeedbackScreen(), transitionDuration: Duration.zero));
+            Navigator.pushReplacement(
+                context,
+                PageRouteBuilder(
+                    pageBuilder: (_, __, ___) => const AdminFeedbackScreen(),
+                    transitionDuration: Duration.zero));
           }),
           _SidebarItem(Icons.assignment, "Reports", false, () {
-            Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminReportsScreen(), transitionDuration: Duration.zero));
+            Navigator.pushReplacement(
+                context,
+                PageRouteBuilder(
+                    pageBuilder: (_, __, ___) => const AdminReportsScreen(),
+                    transitionDuration: Duration.zero));
           }),
           _SidebarItem(Icons.settings, "Settings", false, () {
-            Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminSettingsScreen(), transitionDuration: Duration.zero));
+            Navigator.pushReplacement(
+                context,
+                PageRouteBuilder(
+                    pageBuilder: (_, __, ___) => const AdminSettingsScreen(),
+                    transitionDuration: Duration.zero));
           }),
           const Spacer(),
           _SidebarItem(Icons.logout, "Logout", false, () => _logout(context)),
@@ -139,9 +182,15 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black)),
+              Text(value,
+                  style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black)),
               const SizedBox(height: 6),
-              Text(title, style: TextStyle(fontSize: 14, color: Colors.grey.shade700)),
+              Text(title,
+                  style:
+                      TextStyle(fontSize: 14, color: Colors.grey.shade700)),
             ],
           ),
         ),
@@ -158,20 +207,26 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
     );
   }
 
-  Widget _chipColumn(String title, String value, String subtitle, {Color? color}) {
+  Widget _chipColumn(String title, String value, String subtitle,
+      {Color? color}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: color)),
-        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: color)),
-        Text(subtitle, style: TextStyle(fontSize: 11, color: Colors.grey)),
+        Text(title,
+            style: TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 14, color: color)),
+        Text(value,
+            style: TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 14, color: color)),
+        Text(subtitle, style: const TextStyle(fontSize: 11, color: Colors.grey)),
       ],
     );
   }
 
   Future<Map<String, dynamic>?> _pickImageAndPreview() async {
     try {
-      final XFile? picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+      final XFile? picked =
+          await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
       if (picked == null) return null;
       final bytes = await picked.readAsBytes();
       return {'file': picked, 'bytes': bytes};
@@ -181,11 +236,13 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
     }
   }
 
-  Future<Map<String, String>?> _uploadImageToStorage({required XFile picked, required String productId}) async {
+  Future<Map<String, String>?> _uploadImageToStorage(
+      {required XFile picked, required String productId}) async {
     try {
       final bytes = await picked.readAsBytes();
       final id = const Uuid().v4();
-      final storageRef = FirebaseStorage.instance.ref().child('products/$productId/$id.jpg');
+      final storageRef =
+          FirebaseStorage.instance.ref().child('products/$productId/$id.jpg');
       final metadata = SettableMetadata(contentType: 'image/jpeg');
       final uploadTask = storageRef.putData(bytes, metadata);
       final snapshot = await uploadTask;
@@ -197,6 +254,7 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
     }
   }
 
+  // === PRODUCT DIALOG WITH LOCATION + GEOHASH ===
   Future<void> _showProductDialog({DocumentSnapshot? doc}) async {
     final isEdit = doc != null;
     String name = doc?.safeGet<String>('name') ?? '';
@@ -210,6 +268,14 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
     bool featured = doc?.safeGet<bool>('featured') ?? false;
     String imageUrl = doc?.safeGet<String>('imageUrl') ?? '';
     String imagePath = doc?.safeGet<String>('imagePath') ?? '';
+
+    // LOCATION FROM GEOPOINT
+    GeoPoint? geoPoint =
+        doc?.safeGet<Map<String, dynamic>>('location')?['geopoint'] as GeoPoint?;
+    double? lat = geoPoint?.latitude;
+    double? lng = geoPoint?.longitude;
+    String locationName =
+        doc?.safeGet<Map<String, dynamic>>('location')?['name'] ?? '';
 
     XFile? pickedImage;
     Uint8List? pickedBytes;
@@ -230,16 +296,39 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
             }
           }
 
+          Future<void> pickLocation() async {
+            final result = await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => LocationPickerScreen(
+                  // pass both position and address so the picker can show them
+                  initialPosition:
+                      lat != null && lng != null ? LatLng(lat!, lng!) : null,
+                  initialAddress: locationName.isNotEmpty ? locationName : null,
+                ),
+              ),
+            );
+            if (result != null && result is Map) {
+              setStateDialog(() {
+                lat = result['lat'] as double;
+                lng = result['lng'] as double;
+                locationName = result['name'] ?? 'Shop Location';
+              });
+            }
+          }
+
           return AlertDialog(
             title: Text(isEdit ? 'Edit Product' : 'Add Product'),
             content: SizedBox(
-              width: 560,
+              width: 620,
+              height: 720,
               child: SingleChildScrollView(
                 child: Form(
                   key: _formKey,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // Image picker...
                       GestureDetector(
                         onTap: pickImage,
                         child: Container(
@@ -249,119 +338,242 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                             borderRadius: BorderRadius.circular(8),
                             color: Colors.grey.shade200,
                             image: (pickedBytes != null)
-                                ? DecorationImage(image: MemoryImage(pickedBytes!), fit: BoxFit.contain)
-                                : (imageUrl.isNotEmpty ? DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.contain) : null),
+                                ? DecorationImage(
+                                    image: MemoryImage(pickedBytes!),
+                                    fit: BoxFit.contain)
+                                : (imageUrl.isNotEmpty
+                                    ? DecorationImage(
+                                        image: NetworkImage(imageUrl),
+                                        fit: BoxFit.contain)
+                                    : null),
                           ),
                           child: (pickedBytes == null && imageUrl.isEmpty)
-                              ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: const [Icon(Icons.image, size: 36), SizedBox(height: 6), Text('Tap to pick image')]))
+                              ? const Center(
+                                  child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.image, size: 36),
+                                        SizedBox(height: 6),
+                                        Text('Tap to pick image')
+                                      ]))
                               : null,
                         ),
                       ),
                       const SizedBox(height: 12),
-                      TextFormField(initialValue: name, decoration: const InputDecoration(labelText: 'Name'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null, onSaved: (v) => name = v!.trim()),
-                      TextFormField(initialValue: brand, decoration: const InputDecoration(labelText: 'Brand'), onSaved: (v) => brand = v?.trim() ?? ''),
-                      TextFormField(initialValue: category, decoration: const InputDecoration(labelText: 'Category'), onSaved: (v) => category = v?.trim() ?? ''),
-                      TextFormField(initialValue: description, decoration: const InputDecoration(labelText: 'Description'), maxLines: 2, onSaved: (v) => description = v?.trim() ?? ''),
+                      // Text fields...
                       TextFormField(
-                        initialValue: price != 0.0 ? price.toString() : '',
+                          initialValue: name,
+                          decoration:
+                              const InputDecoration(labelText: 'Name'),
+                          validator: (v) =>
+                              (v == null || v.trim().isEmpty) ? 'Required' : null,
+                          onSaved: (v) => name = v!.trim()),
+                      TextFormField(
+                          initialValue: brand,
+                          decoration:
+                              const InputDecoration(labelText: 'Brand'),
+                          onSaved: (v) => brand = v?.trim() ?? ''),
+                      TextFormField(
+                          initialValue: category,
+                          decoration:
+                              const InputDecoration(labelText: 'Category'),
+                          onSaved: (v) => category = v?.trim() ?? ''),
+                      TextFormField(
+                          initialValue: description,
+                          decoration:
+                              const InputDecoration(labelText: 'Description'),
+                          maxLines: 2,
+                          onSaved: (v) => description = v?.trim() ?? ''),
+                      TextFormField(
+                        initialValue:
+                            price != 0.0 ? price.toString() : '',
                         decoration: const InputDecoration(labelText: 'Price'),
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : (double.tryParse(v) == null ? 'Invalid' : null),
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? 'Required'
+                            : (double.tryParse(v) == null
+                                ? 'Invalid'
+                                : null),
                         onSaved: (v) => price = double.parse(v!.trim()),
                       ),
                       TextFormField(
                         initialValue: stock != 0 ? stock.toString() : '',
-                        decoration: const InputDecoration(labelText: 'Stock (qty)'),
+                        decoration:
+                            const InputDecoration(labelText: 'Stock (qty)'),
                         keyboardType: TextInputType.number,
-                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : (int.tryParse(v) == null ? 'Invalid' : null),
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? 'Required'
+                            : (int.tryParse(v) == null ? 'Invalid' : null),
                         onSaved: (v) => stock = int.parse(v!.trim()),
                       ),
-                      TextFormField(initialValue: unit, decoration: const InputDecoration(labelText: 'Unit'), onSaved: (v) => unit = v?.trim() ?? ''),
+                      TextFormField(
+                          initialValue: unit,
+                          decoration: const InputDecoration(labelText: 'Unit'),
+                          onSaved: (v) => unit = v?.trim() ?? ''),
+                      const SizedBox(height: 20),
+                      const Text("Shop Location (Required)",
+                          style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
-                      Row(children: [Checkbox(value: isAvailable, onChanged: (val) => setStateDialog(() => isAvailable = val ?? true)), const Text('Available'), const SizedBox(width: 16)]),
-                      const SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: pickLocation,
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                                color: lat != null ? Colors.green : Colors.red),
+                            borderRadius: BorderRadius.circular(8),
+                            color: Colors.grey.shade50,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.location_on,
+                                  color: lat != null ? Colors.green : Colors.red),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  lat != null
+                                      ? "$locationName\nLat: ${lat!.toStringAsFixed(5)}, Lng: ${lng!.toStringAsFixed(5)}"
+                                      : "Tap to select shop location on map",
+                                  style: TextStyle(
+                                      color:
+                                          lat != null ? Colors.black : Colors.red),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (lat == null)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 8),
+                          child: Text("Location is required!",
+                              style:
+                                  TextStyle(color: Colors.red, fontSize: 12)),
+                        ),
+                      const SizedBox(height: 16),
+                      Row(children: [
+                        Checkbox(
+                            value: isAvailable,
+                            onChanged: (val) =>
+                                setStateDialog(() => isAvailable = val ?? true)),
+                        const Text('Available')
+                      ]),
                     ],
                   ),
                 ),
               ),
             ),
             actions: [
-              TextButton(onPressed: _saving ? null : () => Navigator.of(context).pop(), child: const Text('Cancel')),
+              TextButton(
+                  onPressed: _saving
+                      ? null
+                      : () => Navigator.of(context).pop(),
+                  child: const Text('Cancel')),
               ElevatedButton(
-                onPressed: _saving ? null : () async {
-                  if (!_formKey.currentState!.validate()) return;
-                  _formKey.currentState!.save();
-                  setState(() => _saving = true);
+                onPressed: _saving || lat == null
+                    ? null
+                    : () async {
+                        if (!_formKey.currentState!.validate()) return;
+                        _formKey.currentState!.save();
+                        setState(() => _saving = true);
 
-                  try {
-                    final oldStock = isEdit ? doc!.safeGet<num>('stock')?.toInt() ?? 0 : 0;
-                    final stockChanged = isEdit && oldStock != stock;
+                        try {
+                          // CREATE GEOPOINT + GEOHASH
+                          final geoPoint = GeoPoint(lat!, lng!);
+                          final geoFirePoint = GeoFirePoint(geoPoint);
+                          final locationData = {
+                            'geopoint': geoPoint,
+                            'geohash': geoFirePoint.data['geohash'],
+                            'name': locationName.isEmpty
+                                ? 'Shop Location'
+                                : locationName,
+                          };
 
-                    if (isEdit) {
-                      final id = doc!.id;
-                      if (pickedImage != null) {
-                        if (imagePath.isNotEmpty) {
-                          try { await FirebaseStorage.instance.ref(imagePath).delete(); } catch (_) {}
+                          if (isEdit) {
+                            final id = doc!.id;
+                            if (pickedImage != null) {
+                              if (imagePath.isNotEmpty) {
+                                try {
+                                  await FirebaseStorage.instance
+                                      .ref(imagePath)
+                                      .delete();
+                                } catch (_) {}
+                              }
+                              final res = await _uploadImageToStorage(
+                                  picked: pickedImage!, productId: id);
+                              if (res != null) {
+                                imageUrl = res['url']!;
+                                imagePath = res['path']!;
+                              }
+                            }
+
+                            final updateData = {
+                              'name': name,
+                              'brand': brand,
+                              'category': category,
+                              'description': description,
+                              'price': price,
+                              'stock': stock,
+                              'unit': unit,
+                              'isAvailable': isAvailable,
+                              'featured': featured,
+                              'imageUrl': imageUrl,
+                              'imagePath': imagePath,
+                              'location': locationData,
+                              'updatedAt': FieldValue.serverTimestamp(),
+                            };
+                            if (stock !=
+                                (doc.safeGet<num>('stock')?.toInt() ?? 0)) {
+                              updateData['lastRestocked'] =
+                                  FieldValue.serverTimestamp();
+                            }
+                            await _productsRef.doc(id).update(updateData);
+                          } else {
+                            final newDocRef = _productsRef.doc();
+                            final id = newDocRef.id;
+                            if (pickedImage != null) {
+                              final res = await _uploadImageToStorage(
+                                  picked: pickedImage!, productId: id);
+                              if (res != null) {
+                                imageUrl = res['url']!;
+                                imagePath = res['path']!;
+                              }
+                            }
+
+                            await newDocRef.set({
+                              'name': name,
+                              'brand': brand,
+                              'category': category,
+                              'description': description,
+                              'price': price,
+                              'stock': stock,
+                              'unit': unit,
+                              'isAvailable': isAvailable,
+                              'featured': featured,
+                              'imageUrl': imageUrl,
+                              'imagePath': imagePath,
+                              'location': locationData,
+                              'lastRestocked':
+                                  stock > 0 ? FieldValue.serverTimestamp() : null,
+                              'rating': 0.0,
+                              'tags': [],
+                              'createdAt': FieldValue.serverTimestamp(),
+                              'updatedAt': FieldValue.serverTimestamp(),
+                            });
+                          }
+                          if (context.mounted) Navigator.of(context).pop();
+                        } catch (e) {
+                          debugPrint('Save error: $e');
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text('Error saving product')));
+                          }
+                        } finally {
+                          setState(() => _saving = false);
                         }
-                        final res = await _uploadImageToStorage(picked: pickedImage!, productId: id);
-                        if (res != null) { imageUrl = res['url']!; imagePath = res['path']!; }
-                      }
-
-                      final updateData = {
-                        'name': name,
-                        'brand': brand,
-                        'category': category,
-                        'description': description,
-                        'price': price,
-                        'stock': stock,
-                        'unit': unit,
-                        'isAvailable': isAvailable,
-                        'featured': featured,
-                        'imageUrl': imageUrl,
-                        'imagePath': imagePath,
-                        'updatedAt': FieldValue.serverTimestamp(),
-                      };
-
-                      if (stockChanged) {
-                        updateData['lastRestocked'] = FieldValue.serverTimestamp();
-                      }
-
-                      await _productsRef.doc(id).update(updateData);
-                    } else {
-                      final newDocRef = _productsRef.doc();
-                      final id = newDocRef.id;
-                      if (pickedImage != null) {
-                        final res = await _uploadImageToStorage(picked: pickedImage!, productId: id);
-                        if (res != null) { imageUrl = res['url']!; imagePath = res['path']!; }
-                      }
-
-                      await newDocRef.set({
-                        'name': name,
-                        'brand': brand,
-                        'category': category,
-                        'description': description,
-                        'price': price,
-                        'stock': stock,
-                        'unit': unit,
-                        'isAvailable': isAvailable,
-                        'featured': featured,
-                        'imageUrl': imageUrl,
-                        'imagePath': imagePath,
-                        'lastRestocked': stock > 0 ? FieldValue.serverTimestamp() : null,
-                        'rating': 0.0,
-                        'tags': [],
-                        'createdAt': FieldValue.serverTimestamp(),
-                        'updatedAt': FieldValue.serverTimestamp(),
-                      });
-                    }
-                    if (context.mounted) Navigator.of(context).pop();
-                  } catch (e) {
-                    debugPrint('Save error: $e');
-                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error saving product')));
-                  } finally {
-                    setState(() => _saving = false);
-                  }
-                },
+                      },
                 child: Text(isEdit ? 'Save' : 'Add'),
               ),
             ],
@@ -372,25 +584,43 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
   }
 
   Future<void> _deleteProduct(DocumentSnapshot doc) async {
-    final confirm = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
-      title: const Text('Delete product'), content: const Text('Are you sure you want to delete this product?'),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-        ElevatedButton(onPressed: () => Navigator.of(context).pop(true), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text('Delete')),
-      ],
-    ));
+    final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+              title: const Text('Delete product'),
+              content: const Text(
+                  'Are you sure you want to delete this product?'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('Cancel')),
+                ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    style:
+                        ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                    child: const Text('Delete')),
+              ],
+            ));
 
     if (confirm == true) {
       try {
         final imagePath = doc.safeGet<String>('imagePath') ?? '';
         if (imagePath.isNotEmpty) {
-          try { await FirebaseStorage.instance.ref(imagePath).delete(); } catch (_) {}
+          try {
+            await FirebaseStorage.instance.ref(imagePath).delete();
+          } catch (_) {}
         }
         await _productsRef.doc(doc.id).delete();
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Product deleted')));
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Product deleted')));
+        }
       } catch (e) {
         debugPrint('Delete error: $e');
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to delete product')));
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Failed to delete product')));
+        }
       }
     }
   }
@@ -404,7 +634,8 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
 
     if (filteredDocs.isEmpty) {
       return const Center(
-        child: Text('No products found', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+        child: Text('No products found',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
       );
     }
 
@@ -422,26 +653,46 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(
-          decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(6)),
+          decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(6)),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: ConstrainedBox(
-              constraints: BoxConstraints(minWidth: MediaQuery.of(context).size.width - 280),
+              constraints: BoxConstraints(
+                  minWidth: MediaQuery.of(context).size.width - 280),
               child: DataTable(
-                headingRowColor: MaterialStateProperty.all(Colors.grey.shade100),
+                headingRowColor:
+                    MaterialStateProperty.all(Colors.grey.shade100),
                 dataRowHeight: 55,
                 headingRowHeight: 50,
                 horizontalMargin: 16,
                 columnSpacing: 24,
-                border: TableBorder(horizontalInside: BorderSide(color: Colors.grey.shade300, width: 1)),
+                border: TableBorder(
+                    horizontalInside:
+                        BorderSide(color: Colors.grey.shade300, width: 1)),
                 columns: const [
-                  DataColumn(label: Text("Product Name/Type", style: TextStyle(fontWeight: FontWeight.w600))),
-                  DataColumn(label: Text("Category", style: TextStyle(fontWeight: FontWeight.w600))),
-                  DataColumn(label: Text("Quantity Available", style: TextStyle(fontWeight: FontWeight.w600))),
-                  DataColumn(label: Text("Reorder Level", style: TextStyle(fontWeight: FontWeight.w600))),
-                  DataColumn(label: Text("Unit Price", style: TextStyle(fontWeight: FontWeight.w600))),
-                  DataColumn(label: Text("Status", style: TextStyle(fontWeight: FontWeight.w600))),
-                  DataColumn(label: Text("Last Restocked", style: TextStyle(fontWeight: FontWeight.w600))),
+                  DataColumn(
+                      label: Text("Product Name/Type",
+                          style: TextStyle(fontWeight: FontWeight.w600))),
+                  DataColumn(
+                      label: Text("Category",
+                          style: TextStyle(fontWeight: FontWeight.w600))),
+                  DataColumn(
+                      label: Text("Quantity Available",
+                          style: TextStyle(fontWeight: FontWeight.w600))),
+                  DataColumn(
+                      label: Text("Reorder Level",
+                          style: TextStyle(fontWeight: FontWeight.w600))),
+                  DataColumn(
+                      label: Text("Unit Price",
+                          style: TextStyle(fontWeight: FontWeight.w600))),
+                  DataColumn(
+                      label: Text("Status",
+                          style: TextStyle(fontWeight: FontWeight.w600))),
+                  DataColumn(
+                      label: Text("Last Restocked",
+                          style: TextStyle(fontWeight: FontWeight.w600))),
                   DataColumn(label: Text("Action")),
                 ],
                 rows: pageDocs.map((doc) {
@@ -449,12 +700,14 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                   final category = doc.safeGet<String>('category') ?? '';
                   final stock = doc.safeGet<num>('stock')?.toInt() ?? 0;
                   final imageUrl = doc.safeGet<String>('imageUrl') ?? '';
-                  final lastRestocked = _safeTimestamp(doc.safeGet<dynamic>('lastRestocked'));
+                  final lastRestocked =
+                      _safeTimestamp(doc.safeGet<dynamic>('lastRestocked'));
                   final lastRestockedText = lastRestocked != null
                       ? '${lastRestocked.year}-${lastRestocked.month.toString().padLeft(2, '0')}-${lastRestocked.day.toString().padLeft(2, '0')}'
                       : '-';
                   final isAvailable = doc.safeGet<bool>('isAvailable') ?? true;
-                  final currentPrice = doc.safeGet<num>('price')?.toDouble() ?? 0.0;
+                  final currentPrice =
+                      doc.safeGet<num>('price')?.toDouble() ?? 0.0;
 
                   return DataRow(
                     cells: [
@@ -462,7 +715,12 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                         if (imageUrl.isNotEmpty)
                           ClipRRect(
                             borderRadius: BorderRadius.circular(6),
-                            child: Image.network(imageUrl, width: 56, height: 40, fit: BoxFit.contain, errorBuilder: (c, e, s) => const Icon(Icons.image_not_supported)),
+                            child: Image.network(imageUrl,
+                                width: 56,
+                                height: 40,
+                                fit: BoxFit.contain,
+                                errorBuilder: (c, e, s) =>
+                                    const Icon(Icons.image_not_supported)),
                           ),
                         const SizedBox(width: 8),
                         Flexible(child: Text(productName)),
@@ -470,12 +728,20 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                       DataCell(Text(category)),
                       DataCell(Text(stock.toString())),
                       const DataCell(Text("10")),
-                      DataCell(Text('₱${currentPrice.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold))), // ONLY MANUAL PRICE
-                      DataCell(Text(isAvailable ? "In Stock" : "Unavailable", style: TextStyle(color: isAvailable ? Colors.green : Colors.red, fontWeight: FontWeight.w600))),
+                      DataCell(Text('₱${currentPrice.toStringAsFixed(2)}',
+                          style: const TextStyle(fontWeight: FontWeight.bold))),
+                      DataCell(Text(isAvailable ? "In Stock" : "Unavailable",
+                          style: TextStyle(
+                              color: isAvailable ? Colors.green : Colors.red,
+                              fontWeight: FontWeight.w600))),
                       DataCell(Text(lastRestockedText)),
                       DataCell(Row(children: [
-                        IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () => _showProductDialog(doc: doc)),
-                        IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _deleteProduct(doc)),
+                        IconButton(
+                            icon: const Icon(Icons.edit, color: Colors.blue),
+                            onPressed: () => _showProductDialog(doc: doc)),
+                        IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _deleteProduct(doc)),
                       ])),
                     ],
                   );
@@ -492,13 +758,18 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               IconButton(
-                onPressed: _currentPage > 0 ? () => setState(() => _currentPage--) : null,
+                onPressed: _currentPage > 0
+                    ? () => setState(() => _currentPage--)
+                    : null,
                 icon: const Icon(Icons.chevron_left),
                 tooltip: 'Previous',
               ),
-              Text('Page ${_currentPage + 1} of $totalPages', style: const TextStyle(fontWeight: FontWeight.w500)),
+              Text('Page ${_currentPage + 1} of $totalPages',
+                  style: const TextStyle(fontWeight: FontWeight.w500)),
               IconButton(
-                onPressed: _currentPage < totalPages - 1 ? () => setState(() => _currentPage++) : null,
+                onPressed: _currentPage < totalPages - 1
+                    ? () => setState(() => _currentPage++)
+                    : null,
                 icon: const Icon(Icons.chevron_right),
                 tooltip: 'Next',
               ),
@@ -509,14 +780,17 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
     );
   }
 
-  Future<void> _updateStockDialogBulk(List<QueryDocumentSnapshot> docsToEdit) async {
+  Future<void> _updateStockDialogBulk(
+      List<QueryDocumentSnapshot> docsToEdit) async {
     if (docsToEdit.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No products to update.')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('No products to update.')));
       return;
     }
     final controllers = <String, TextEditingController>{};
     for (var doc in docsToEdit) {
-      controllers[doc.id] = TextEditingController(text: (doc.safeGet<num>('stock')?.toInt() ?? 0).toString());
+      controllers[doc.id] = TextEditingController(
+          text: (doc.safeGet<num>('stock')?.toInt() ?? 0).toString());
     }
     await showDialog(
       context: context,
@@ -534,9 +808,18 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Expanded(child: Text(name, style: const TextStyle(fontSize: 14), overflow: TextOverflow.ellipsis)),
+                      Expanded(
+                          child: Text(name,
+                              style: const TextStyle(fontSize: 14),
+                              overflow: TextOverflow.ellipsis)),
                       const SizedBox(width: 20),
-                      SizedBox(width: 70, child: TextField(controller: controllers[doc.id], keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stock', isDense: true))),
+                      SizedBox(
+                          width: 70,
+                          child: TextField(
+                              controller: controllers[doc.id],
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                  labelText: 'Stock', isDense: true))),
                     ],
                   ),
                 );
@@ -545,13 +828,15 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(context);
               final batch = FirebaseFirestore.instance.batch();
               for (var doc in docsToEdit) {
-                final newStock = int.tryParse(controllers[doc.id]?.text ?? '') ?? 0;
+                final newStock =
+                    int.tryParse(controllers[doc.id]?.text ?? '') ?? 0;
                 final oldStock = doc.safeGet<num>('stock')?.toInt() ?? 0;
                 final updateData = {
                   'stock': newStock,
@@ -564,10 +849,16 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
               }
               try {
                 await batch.commit();
-                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Stocks updated')));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Stocks updated')));
+                }
               } catch (e) {
                 debugPrint('Bulk update error: $e');
-                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to update stocks')));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Failed to update stocks')));
+                }
               }
             },
             child: const Text('Save Changes'),
@@ -579,11 +870,13 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
 
   void _exportVisibleToCsv(List<QueryDocumentSnapshot> visibleDocs) {
     if (!kIsWeb) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Export to CSV is available on web only.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Export to CSV is available on web only.')));
       return;
     }
     if (visibleDocs.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No products to export')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('No products to export')));
       return;
     }
 
@@ -591,7 +884,9 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
     rows.add(['Name', 'Category', 'Stock', 'Price', 'Availability', 'Last Restocked']);
     for (var doc in visibleDocs) {
       final lastRestocked = _safeTimestamp(doc.safeGet<dynamic>('lastRestocked'));
-      final lastRestockedText = lastRestocked != null ? '${lastRestocked.year}-${lastRestocked.month.toString().padLeft(2, '0')}-${lastRestocked.day.toString().padLeft(2, '0')}' : '';
+      final lastRestockedText = lastRestocked != null
+          ? '${lastRestocked.year}-${lastRestocked.month.toString().padLeft(2, '0')}-${lastRestocked.day.toString().padLeft(2, '0')}'
+          : '';
       rows.add([
         doc.safeGet<String>('name') ?? '',
         doc.safeGet<String>('category') ?? '',
@@ -606,7 +901,9 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
     final bytes = utf8.encode(csv);
     final blob = html.Blob([bytes]);
     final url = html.Url.createObjectUrlFromBlob(blob);
-    final anchor = html.AnchorElement(href: url)..setAttribute('download', 'inventory_report.csv')..click();
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', 'inventory_report.csv')
+      ..click();
     html.Url.revokeObjectUrl(url);
   }
 
@@ -625,11 +922,19 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text("Inventory", style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
+                      const Text("Inventory",
+                          style: TextStyle(
+                              fontSize: 26, fontWeight: FontWeight.bold)),
                       ElevatedButton(
                         onPressed: () => _showProductDialog(),
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6))),
-                        child: const Text("Add New Stock", style: TextStyle(color: Colors.white)),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6))),
+                        child: const Text("Add New Stock",
+                            style: TextStyle(color: Colors.white)),
                       ),
                     ],
                   ),
@@ -637,7 +942,8 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                   Expanded(
                     child: Card(
                       elevation: 3,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: SingleChildScrollView(
@@ -648,20 +954,43 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                               StreamBuilder<QuerySnapshot>(
                                 stream: _productsRef.snapshots(),
                                 builder: (context, snapshot) {
-                                  String total = '0', low = '0 items', updated = '-';
+                                  String total = '0',
+                                      low = '0 items',
+                                      updated = '-';
                                   if (snapshot.hasData) {
                                     final docs = snapshot.data!.docs;
-                                    total = docs.fold(0, (p, d) => p + (d.safeGet<num>('stock')?.toInt() ?? 0)).toString();
-                                    low = '${docs.where((d) => (d.safeGet<num>('stock')?.toInt() ?? 0) <= 5).length} items';
-                                    final updatedDocs = docs.where((d) => _safeTimestamp(d.safeGet<dynamic>('updatedAt')) != null).toList();
+                                    total = docs
+                                        .fold(
+                                            0,
+                                            (p, d) =>
+                                                p +
+                                                (d.safeGet<num>('stock')
+                                                        ?.toInt() ??
+                                                    0))
+                                        .toString();
+                                    low =
+                                        '${docs.where((d) => (d.safeGet<num>('stock')?.toInt() ?? 0) <= 5).length} items';
+                                    final updatedDocs = docs
+                                        .where((d) => _safeTimestamp(
+                                            d.safeGet<dynamic>('updatedAt')) !=
+                                        null)
+                                        .toList();
                                     if (updatedDocs.isNotEmpty) {
                                       updatedDocs.sort((a, b) {
-                                        final ta = _safeTimestamp(a.safeGet<dynamic>('updatedAt')) ?? DateTime(1970);
-                                        final tb = _safeTimestamp(b.safeGet<dynamic>('updatedAt')) ?? DateTime(1970);
+                                        final ta = _safeTimestamp(
+                                                a.safeGet<dynamic>('updatedAt')) ??
+                                            DateTime(1970);
+                                        final tb = _safeTimestamp(
+                                                b.safeGet<dynamic>('updatedAt')) ??
+                                            DateTime(1970);
                                         return tb.compareTo(ta);
                                       });
-                                      final t = _safeTimestamp(updatedDocs.first.safeGet<dynamic>('updatedAt'));
-                                      updated = t != null ? '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}' : '-';
+                                      final t = _safeTimestamp(updatedDocs
+                                          .first
+                                          .safeGet<dynamic>('updatedAt'));
+                                      updated = t != null
+                                          ? '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}'
+                                          : '-';
                                     }
                                   }
 
@@ -681,33 +1010,69 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                                 children: [
                                   ElevatedButton(
                                     onPressed: () async {
-                                      final snapshot = await _productsRef.orderBy('name').get();
+                                      final snapshot = await _productsRef
+                                          .orderBy('name')
+                                          .get();
                                       final visible = snapshot.docs.where((d) {
-                                        final name = (d.safeGet<String>('name') ?? '').toLowerCase();
-                                        final brand = (d.safeGet<String>('brand') ?? '').toLowerCase();
-                                        final category = (d.safeGet<String>('category') ?? '').toLowerCase();
-                                        final q = _searchQuery.trim().toLowerCase();
-                                        return q.isEmpty || name.contains(q) || brand.contains(q) || category.contains(q);
+                                        final name = (d.safeGet<String>('name') ??
+                                                '')
+                                            .toLowerCase();
+                                        final brand = (d.safeGet<String>('brand') ??
+                                                '')
+                                            .toLowerCase();
+                                        final category = (d.safeGet<String>('category') ??
+                                                '')
+                                            .toLowerCase();
+                                        final q =
+                                            _searchQuery.trim().toLowerCase();
+                                        return q.isEmpty ||
+                                            name.contains(q) ||
+                                            brand.contains(q) ||
+                                            category.contains(q);
                                       }).toList();
                                       await _updateStockDialogBulk(visible);
                                     },
-                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6))),
-                                    child: const Text("Update Stock", style: TextStyle(color: Colors.white)),
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.blue,
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 18, vertical: 12),
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(6))),
+                                    child: const Text("Update Stock",
+                                        style: TextStyle(color: Colors.white)),
                                   ),
                                   const SizedBox(width: 12),
                                   OutlinedButton(
                                     onPressed: () async {
-                                      final snapshot = await _productsRef.orderBy('name').get();
+                                      final snapshot = await _productsRef
+                                          .orderBy('name')
+                                          .get();
                                       final visible = snapshot.docs.where((d) {
-                                        final name = (d.safeGet<String>('name') ?? '').toLowerCase();
-                                        final brand = (d.safeGet<String>('brand') ?? '').toLowerCase();
-                                        final category = (d.safeGet<String>('category') ?? '').toLowerCase();
-                                        final q = _searchQuery.trim().toLowerCase();
-                                        return q.isEmpty || name.contains(q) || brand.contains(q) || category.contains(q);
+                                        final name = (d.safeGet<String>('name') ??
+                                                '')
+                                            .toLowerCase();
+                                        final brand = (d.safeGet<String>('brand') ??
+                                                '')
+                                            .toLowerCase();
+                                        final category = (d.safeGet<String>('category') ??
+                                                '')
+                                            .toLowerCase();
+                                        final q =
+                                            _searchQuery.trim().toLowerCase();
+                                        return q.isEmpty ||
+                                            name.contains(q) ||
+                                            brand.contains(q) ||
+                                            category.contains(q);
                                       }).toList();
                                       _exportVisibleToCsv(visible);
                                     },
-                                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6))),
+                                    style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 18, vertical: 12),
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(6))),
                                     child: const Text("Export Inventory Report"),
                                   ),
                                   const Spacer(),
@@ -717,8 +1082,12 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                                       decoration: InputDecoration(
                                         hintText: "Search",
                                         prefixIcon: const Icon(Icons.search),
-                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                        border: OutlineInputBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(6)),
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                                horizontal: 12, vertical: 10),
                                       ),
                                       onChanged: (q) {
                                         setState(() {
@@ -734,28 +1103,38 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
 
                               // === DOE CHIP (WITH lastChecked) ===
                               Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                 child: Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
                                     color: Colors.blue.shade50,
                                     borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.blue.shade200),
+                                    border:
+                                        Border.all(color: Colors.blue.shade200),
                                   ),
                                   child: StreamBuilder<DocumentSnapshot>(
-                                    stream: FirebaseFirestore.instance.doc('doe_latest/lpg').snapshots(),
+                                    stream: FirebaseFirestore.instance
+                                        .doc('doe_latest/lpg')
+                                        .snapshots(),
                                     builder: (context, snapshot) {
-                                      if (!snapshot.hasData || !snapshot.data!.exists) {
+                                      if (!snapshot.hasData ||
+                                          !snapshot.data!.exists) {
                                         return _buildDoeChip('?', '?', 'Unknown');
                                       }
-                                      final d = snapshot.data!.data() as Map<String, dynamic>;
-                                      final min = d['pricePerKgMin']?.toString() ?? '0';
-                                      final max = d['pricePerKgMax']?.toString() ?? '0';
-                                      final lastChecked = _safeTimestamp(d['lastChecked']);
+                                      final d = snapshot.data!.data()
+                                          as Map<String, dynamic>;
+                                      final min =
+                                          d['pricePerKgMin']?.toString() ?? '0';
+                                      final max =
+                                          d['pricePerKgMax']?.toString() ?? '0';
+                                      final lastChecked =
+                                          _safeTimestamp(d['lastChecked']);
                                       final lastCheckedText = lastChecked != null
                                           ? '${lastChecked.year}-${lastChecked.month.toString().padLeft(2, '0')}-${lastChecked.day.toString().padLeft(2, '0')}'
                                           : 'Unknown';
-                                      return _buildDoeChip(min, max, lastCheckedText);
+                                      return _buildDoeChip(
+                                          min, max, lastCheckedText);
                                     },
                                   ),
                                 ),
@@ -766,9 +1145,18 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                               StreamBuilder<QuerySnapshot>(
                                 stream: _productsRef.orderBy('name').snapshots(),
                                 builder: (context, snapshot) {
-                                  if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-                                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('No products found'));
-                                  return _buildPaginatedTable(snapshot.data!.docs);
+                                  if (snapshot.connectionState ==
+                                      ConnectionState.waiting) {
+                                    return const Center(
+                                        child: CircularProgressIndicator());
+                                  }
+                                  if (!snapshot.hasData ||
+                                      snapshot.data!.docs.isEmpty) {
+                                    return const Center(
+                                        child: Text('No products found'));
+                                  }
+                                  return _buildPaginatedTable(
+                                      snapshot.data!.docs);
                                 },
                               ),
                             ],
@@ -788,14 +1176,21 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
 }
 
 class _SidebarItem extends StatefulWidget {
-  final IconData icon; final String title; final bool active; final VoidCallback onTap;
-  const _SidebarItem(this.icon, this.title, this.active, this.onTap, {Key? key}) : super(key: key);
-  @override State<_SidebarItem> createState() => _SidebarItemState();
+  final IconData icon;
+  final String title;
+  final bool active;
+  final VoidCallback onTap;
+  const _SidebarItem(this.icon, this.title, this.active, this.onTap,
+      {Key? key})
+      : super(key: key);
+  @override
+  State<_SidebarItem> createState() => _SidebarItemState();
 }
 
 class _SidebarItemState extends State<_SidebarItem> {
   bool _hovering = false;
-  @override Widget build(BuildContext context) {
+  @override
+  Widget build(BuildContext context) {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
@@ -803,10 +1198,16 @@ class _SidebarItemState extends State<_SidebarItem> {
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         decoration: BoxDecoration(
-          color: widget.active ? Colors.white.withOpacity(0.1) : (_hovering ? Colors.white.withOpacity(0.15) : Colors.transparent),
+          color: widget.active
+              ? Colors.white.withOpacity(0.1)
+              : (_hovering ? Colors.white.withOpacity(0.15) : Colors.transparent),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: ListTile(leading: Icon(widget.icon, color: Colors.white), title: Text(widget.title, style: const TextStyle(color: Colors.white)), onTap: widget.onTap),
+        child: ListTile(
+            leading: Icon(widget.icon, color: Colors.white),
+            title: Text(widget.title,
+                style: const TextStyle(color: Colors.white)),
+            onTap: widget.onTap),
       ),
     );
   }
@@ -817,9 +1218,14 @@ class _SimpleCsvConverter {
   String convert(List<List<String>> rows) {
     String escapeCell(String cell) {
       if (cell.contains('"')) cell = cell.replaceAll('"', '""');
-      if (cell.contains(',') || cell.contains('"') || cell.contains('\n')) return '"$cell"';
+      if (cell.contains(',') ||
+          cell.contains('"') ||
+          cell.contains('\n')) return '"$cell"';
       return cell;
     }
-    return rows.map((r) => r.map(escapeCell).join(',')).join('\r\n');
+
+    return rows
+        .map((r) => r.map(escapeCell).join(','))
+        .join('\r\n');
   }
 }

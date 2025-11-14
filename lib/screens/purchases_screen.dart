@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:rxdart/rxdart.dart';
 import 'package:daligas/screens/account_screen.dart';
 import 'package:daligas/screens/cart_screen.dart' as cart;
 import 'package:daligas/screens/help_screen.dart';
@@ -22,7 +23,15 @@ class PurchasesScreen extends StatefulWidget {
 class _PurchasesScreenState extends State<PurchasesScreen> {
   final User? user = FirebaseAuth.instance.currentUser;
 
-  // ── DOUBLE BACK TO EXIT (YOUR CHOICE: KEEP) ───────────
+  // Reactive order counts for each tab
+  final BehaviorSubject<Map<String, int>> _tabCounts = BehaviorSubject.seeded({
+    'All': 0,
+    'Processing': 0,
+    'Shipped': 0,
+    'Delivered': 0,
+    'Review': 0,
+  });
+
   DateTime? _lastBackPress;
   static const int _backPressTimeout = 2;
 
@@ -39,9 +48,53 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
     if (Platform.isAndroid) {
       SystemNavigator.pop();
     } else {
-      exit(0); // ← YOUR CHOICE: KEEP
+      exit(0);
     }
     return true;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (user != null) {
+      _listenToOrders();
+    }
+  }
+
+  void _listenToOrders() {
+    FirebaseFirestore.instance
+        .collection('orders')
+        .where('userId', isEqualTo: user!.uid)
+        .snapshots()
+        .listen((snapshot) {
+      final docs = snapshot.docs;
+      final counts = {
+        'All': docs.length,
+        'Processing': 0,
+        'Shipped': 0,
+        'Delivered': 0,
+        'Review': 0,
+      };
+
+      for (final doc in docs) {
+        final data = doc.data();
+        final status = data['deliveryStatus'] ?? 'Processing';
+        final reviewed = data['reviewed'] == true;
+
+        counts[status] = (counts[status] ?? 0) + 1;
+        if (status == 'Delivered' && !reviewed) {
+          counts['Review'] = (counts['Review'] ?? 0) + 1;
+        }
+      }
+
+      _tabCounts.add(counts);
+    });
+  }
+
+  @override
+  void dispose() {
+    _tabCounts.close();
+    super.dispose();
   }
 
   @override
@@ -73,32 +126,69 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
               ),
               const SizedBox(width: 8),
             ],
-            bottom: const TabBar(
-              isScrollable: false,
-              indicatorColor: Colors.white,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white70,
-              labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-              unselectedLabelStyle: TextStyle(fontWeight: FontWeight.normal, fontSize: 13),
-              tabs: [
-                Tab(child: FittedBox(child: Text('All'))),
-                Tab(child: FittedBox(child: Text('Processing'))),
-                Tab(child: FittedBox(child: Text('Shipped'))),
-                Tab(child: FittedBox(child: Text('Delivered'))),
-                Tab(child: FittedBox(child: Text('Review'))),
+            bottom: PreferredSize(
+  preferredSize: const Size.fromHeight(48),
+  child: StreamBuilder<Map<String, int>>(
+    stream: _tabCounts.stream,
+    builder: (context, snapshot) {
+      final counts = snapshot.data ?? {};
+      return TabBar(
+        isScrollable: false,
+        indicatorColor: Colors.white,
+        labelColor: Colors.white,
+        unselectedLabelColor: Colors.white70,
+        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 13),
+        tabs: [
+          _buildTab('All', counts['All']),
+          _buildTab('Processing', counts['Processing']),
+          _buildTab('Shipped', counts['Shipped']),
+          _buildTab('Delivered', counts['Delivered']),
+          _buildTab('Review', counts['Review']),
+        ],
+      );
+    },
+  ),
+),
+          ),
+          body: RefreshIndicator(
+            onRefresh: () async {
+              HapticFeedback.lightImpact();
+              await Future.delayed(const Duration(milliseconds: 800));
+            },
+            color: Colors.cyan,
+            child: TabBarView(
+              children: [
+                PurchasesTab(userId: user!.uid, statusFilter: null, tabCounts: _tabCounts),
+                PurchasesTab(userId: user!.uid, statusFilter: 'Processing', tabCounts: _tabCounts),
+                PurchasesTab(userId: user!.uid, statusFilter: 'Shipped', tabCounts: _tabCounts),
+                PurchasesTab(userId: user!.uid, statusFilter: 'Delivered', tabCounts: _tabCounts),
+                PurchasesTab(userId: user!.uid, statusFilter: 'Delivered', showReview: true, tabCounts: _tabCounts),
               ],
             ),
           ),
-          body: TabBarView(
-            children: [
-              PurchasesTab(userId: user!.uid, statusFilter: null),
-              PurchasesTab(userId: user!.uid, statusFilter: 'Processing'),
-              PurchasesTab(userId: user!.uid, statusFilter: 'Shipped'),
-              PurchasesTab(userId: user!.uid, statusFilter: 'Delivered'),
-              PurchasesTab(userId: user!.uid, statusFilter: 'Delivered', showReview: true),
-            ],
-          ),
           bottomNavigationBar: _buildBottomNav(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTab(String label, int? count) {
+    return Tab(
+      child: FittedBox(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label),
+            if (count != null && count > 0) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(10)),
+                child: Text('$count', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -144,13 +234,19 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
   }
 }
 
-// ── PURCHASES TAB (REVIEW FILTER + ACTION BUTTONS) ───
 class PurchasesTab extends StatelessWidget {
   final String userId;
   final String? statusFilter;
   final bool showReview;
+  final BehaviorSubject<Map<String, int>> tabCounts;
 
-  const PurchasesTab({super.key, required this.userId, this.statusFilter, this.showReview = false});
+  const PurchasesTab({
+    super.key,
+    required this.userId,
+    this.statusFilter,
+    this.showReview = false,
+    required this.tabCounts,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -162,10 +258,10 @@ class PurchasesTab extends StatelessWidget {
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator(color: Colors.white));
+          return _buildSkeleton();
         }
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const Center(child: Text('No orders yet', style: TextStyle(color: Colors.white70)));
+          return _buildEmptyState('No orders yet');
         }
 
         var orders = snapshot.data!.docs;
@@ -183,7 +279,7 @@ class PurchasesTab extends StatelessWidget {
         }
 
         if (orders.isEmpty) {
-          return const Center(child: Text('No orders in this tab', style: TextStyle(color: Colors.white70)));
+          return _buildEmptyState('No orders in this tab');
         }
 
         return ListView.builder(
@@ -216,12 +312,15 @@ class PurchasesTab extends StatelessWidget {
             });
 
             return InkWell(
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => OrderDetailsScreen(orderId: orderId, orderData: orderData, items: items),
-                ),
-              ),
+              onTap: () {
+                HapticFeedback.lightImpact();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => OrderDetailsScreen(orderId: orderId, orderData: orderData, items: items),
+                  ),
+                );
+              },
               child: Card(
                 margin: const EdgeInsets.symmetric(vertical: 6),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
@@ -273,6 +372,50 @@ class PurchasesTab extends StatelessWidget {
     );
   }
 
+  Widget _buildSkeleton() {
+    return ListView.builder(
+      padding: const EdgeInsets.all(8),
+      itemCount: 5,
+      itemBuilder: (_, __) => Card(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Row(
+            children: [
+              Container(width: 80, height: 80, color: Colors.grey[700]),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(height: 14, width: 120, color: Colors.grey[600]),
+                    const SizedBox(height: 8),
+                    Container(height: 12, width: 80, color: Colors.grey[600]),
+                    const SizedBox(height: 8),
+                    Container(height: 16, width: 60, color: Colors.grey[600]),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.shopping_bag_outlined, size: 80, color: Colors.white54),
+          const SizedBox(height: 16),
+          Text(message, style: const TextStyle(color: Colors.white70, fontSize: 16)),
+        ],
+      ),
+    );
+  }
+
   String _getStatusText(String status) => switch (status) {
     'Processing' => 'Processing',
     'Shipped' => 'Out for delivery',
@@ -292,22 +435,21 @@ class PurchasesTab extends StatelessWidget {
   Widget _buildActionButton(BuildContext context, String status, DocumentSnapshot orderDoc, List<Map<String, dynamic>> items, bool showReview) {
     final orderId = orderDoc.id;
 
-    // Review Tab: Show "Review" button
     if (showReview) {
       return OutlinedButton(
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => ReviewOrderScreen(orderId: orderId, items: items)),
-        ),
+        onPressed: () {
+          HapticFeedback.lightImpact();
+          Navigator.push(context, MaterialPageRoute(builder: (_) => ReviewOrderScreen(orderId: orderId, items: items)));
+        },
         style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), minimumSize: const Size(0, 0)),
         child: const Text('Review', style: TextStyle(fontSize: 12)),
       );
     }
 
-    // Processing: Show "Cancel"
     if (status == 'Processing') {
       return OutlinedButton(
         onPressed: () async {
+          HapticFeedback.lightImpact();
           final confirm = await showDialog<bool>(
             context: context,
             builder: (_) => AlertDialog(
@@ -329,21 +471,22 @@ class PurchasesTab extends StatelessWidget {
       );
     }
 
-    // Delivered: Show "Buy Again"
     if (status == 'Delivered') {
       return OutlinedButton(
-        onPressed: () => _buyAgain(context, items),
+        onPressed: () {
+          HapticFeedback.lightImpact();
+          _buyAgain(context, items);
+        },
         style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), minimumSize: const Size(0, 0)),
         child: const Text('Buy Again', style: TextStyle(fontSize: 12)),
       );
     }
 
-    // Default: View Details
     return OutlinedButton(
-      onPressed: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => OrderDetailsScreen(orderId: orderId, orderData: orderDoc.data() as Map<String, dynamic>, items: items)),
-      ),
+      onPressed: () {
+        HapticFeedback.lightImpact();
+        Navigator.push(context, MaterialPageRoute(builder: (_) => OrderDetailsScreen(orderId: orderId, orderData: orderDoc.data() as Map<String, dynamic>, items: items)));
+      },
       style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), minimumSize: const Size(0, 0)),
       child: const Text('View Details', style: TextStyle(fontSize: 12)),
     );
@@ -351,7 +494,7 @@ class PurchasesTab extends StatelessWidget {
 
   Future<void> _buyAgain(BuildContext context, List<Map<String, dynamic>> items) async {
     final batch = FirebaseFirestore.instance.batch();
-    final cartRef = FirebaseFirestore.instance.collection('cart').doc(FirebaseAuth.instance.currentUser!.uid).collection('items');
+    final cartRef = FirebaseFirestore.instance.collection('carts').doc(FirebaseAuth.instance.currentUser!.uid).collection('items');
 
     for (final item in items) {
       final docRef = cartRef.doc();

@@ -15,7 +15,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   LatLng? _selectedPosition;
   String _selectedAddress = 'Tap on the map to select a location';
   bool _isLoading = false;
-  bool _isLocating = false; // ← NEW: Spinner for My Location
+  bool _isLocating = false;
 
   @override
   void dispose() {
@@ -23,17 +23,31 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     super.dispose();
   }
 
+  // HELPER: Round to 5 decimal places (~1 meter accuracy)
+  LatLng _roundLatLng(LatLng latLng) {
+    return LatLng(
+      double.parse(latLng.latitude.toStringAsFixed(5)),
+      double.parse(latLng.longitude.toStringAsFixed(5)),
+    );
+  }
+
   Future<void> _onMapTap(LatLng position) async {
     if (!mounted) return;
 
+    final roundedPosition = _roundLatLng(position);
+
     setState(() {
-      _selectedPosition = position;
+      _selectedPosition = roundedPosition;
       _isLoading = true;
       _selectedAddress = 'Getting address...';
     });
 
     try {
-      final placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+      final placemarks = await placemarkFromCoordinates(
+        roundedPosition.latitude,
+        roundedPosition.longitude,
+      );
+
       if (!mounted) return;
 
       if (placemarks.isNotEmpty) {
@@ -52,9 +66,13 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         setState(() => _selectedAddress = 'No address found');
       }
     } catch (e) {
-      if (mounted) setState(() => _selectedAddress = 'Failed to get address');
+      if (mounted) {
+        setState(() => _selectedAddress = 'Failed to get address');
+      }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -67,7 +85,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       if (!serviceEnabled) {
         await _showLocationDialog(
           'Location Services Disabled',
-          'Please enable your device’s location services to use this feature.',
+          'Please enable your device’s location services.',
           openSettings: Geolocator.openLocationSettings,
         );
         return;
@@ -79,7 +97,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         if (permission == LocationPermission.denied) {
           await _showLocationDialog(
             'Permission Denied',
-            'This feature requires location access. Please enable it in settings.',
+            'Location access is required.',
             openSettings: Geolocator.openAppSettings,
           );
           return;
@@ -89,17 +107,24 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       if (permission == LocationPermission.deniedForever) {
         await _showLocationDialog(
           'Location Permanently Denied',
-          'Location permissions are permanently denied. Please enable them from app settings.',
+          'Enable location in app settings.',
           openSettings: Geolocator.openAppSettings,
         );
         return;
       }
 
-      final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      final latLng = LatLng(position.latitude, position.longitude);
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
 
-      _mapController?.animateCamera(CameraUpdate.newLatLngZoom(latLng, 16));
-      await _onMapTap(latLng);
+      final rawLatLng = LatLng(position.latitude, position.longitude);
+      final roundedLatLng = _roundLatLng(rawLatLng);
+
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(roundedLatLng, 16),
+      );
+
+      await _onMapTap(roundedLatLng);
     } catch (e) {
       if (mounted) {
         await _showLocationDialog(
@@ -108,11 +133,17 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isLocating = false);
+      if (mounted) {
+        setState(() => _isLocating = false);
+      }
     }
   }
 
-  Future<void> _showLocationDialog(String title, String content, {Future<void> Function()? openSettings}) async {
+  Future<void> _showLocationDialog(
+    String title,
+    String content, {
+    Future<void> Function()? openSettings,
+  }) async {
     if (!mounted) return;
 
     await showDialog(
@@ -237,14 +268,14 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                       children: [
                         Expanded(
                           child: ElevatedButton.icon(
-                            onPressed: _isLocating ? () {} : _goToCurrentLocation, // ← Always enabled
+                            onPressed: _isLocating ? null : _goToCurrentLocation,
                             icon: _isLocating
                                 ? const SizedBox(
                                     width: 18,
                                     height: 18,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF052238)),
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                     ),
                                   )
                                 : const Icon(Icons.my_location, size: 18),
@@ -257,8 +288,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                               foregroundColor: const Color(0xFF052238),
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              elevation: _isLocating ? 2 : 3,
-                              shadowColor: _isLocating ? Colors.transparent : Colors.black26,
+                              elevation: 3,
                             ),
                           ),
                         ),

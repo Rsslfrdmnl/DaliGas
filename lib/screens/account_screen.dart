@@ -1,5 +1,6 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart'; // ← ADD THIS
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
+import 'package:rxdart/rxdart.dart';
 import 'package:daligas/screens/home_screen.dart';
 import 'package:daligas/screens/messages_screen.dart';
 import 'package:daligas/screens/purchases_screen.dart';
@@ -28,19 +30,23 @@ class _AccountScreenState extends State<AccountScreen> {
   final _auth = FirebaseAuth.instance;
   final _firestore = FirebaseFirestore.instance;
 
-  String fullName = '';
-  String email = '';
-  String phone = '';
-  String profileImage = '';
-  bool isLoading = true;
+  // ── Reactive Streams ─────────────────────
+  final BehaviorSubject<Map<String, dynamic>> _userData = BehaviorSubject.seeded({
+    'fullName': '',
+    'email': '',
+    'phone': '',
+    'profileImage': '',
+  });
+  final BehaviorSubject<bool> _isLoading = BehaviorSubject.seeded(true);
 
-  // ── Double-Back-to-Exit Logic ─────────────────────
+  late final StreamSubscription _userSub;
+
+  // ── Double-Back-to-Exit ──────────────────
   DateTime? _lastBackPress;
   static const int _backPressTimeout = 2;
 
   Future<bool> _onWillPop() async {
     final now = DateTime.now();
-
     if (_lastBackPress == null ||
         now.difference(_lastBackPress!) > const Duration(seconds: _backPressTimeout)) {
       _lastBackPress = now;
@@ -53,53 +59,59 @@ class _AccountScreenState extends State<AccountScreen> {
       );
       return false;
     }
-
-    // Let system handle exit (Android back stack)
     return true;
   }
-  // ───────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
-    fetchUserData();
+    _listenToUser();
   }
 
-  Future<void> fetchUserData() async {
-    setState(() => isLoading = true);
-    try {
-      final user = _auth.currentUser;
-      if (user == null) {
-        if (mounted) setState(() => isLoading = false);
-        return;
-      }
-      final doc = await _firestore.collection('users').doc(user.uid).get();
-      if (doc.exists) {
-        final data = doc.data()!;
-        if (mounted) {
-          setState(() {
-            fullName = (data['fullName'] ?? '') as String;
-            email = (data['email'] ?? user.email ?? '') as String;
-            phone = (data['phone'] ?? user.phoneNumber ?? '') as String;
-            profileImage = (data['profileImage'] ?? '') as String;
-            isLoading = false;
-          });
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            fullName = 'User';
-            email = user.email ?? '';
-            phone = user.phoneNumber ?? '';
-            profileImage = '';
-            isLoading = false;
-          });
-        }
-      }
-    } catch (e) {
-      if (kDebugMode) print('fetchUserData error: $e'); // ← FIXED
-      if (mounted) setState(() => isLoading = false);
+  @override
+  void dispose() {
+    _userSub.cancel();
+    _userData.close();
+    _isLoading.close();
+    super.dispose();
+  }
+
+  void _listenToUser() {
+    final user = _auth.currentUser;
+    if (user == null) {
+      _isLoading.add(false);
+      return;
     }
+
+    _userSub = _firestore
+        .collection('users')
+        .doc(user.uid)
+        .snapshots()
+        .debounceTime(const Duration(milliseconds: 300))
+        .listen(
+      (doc) {
+        if (!doc.exists) {
+          _userData.add({
+            'fullName': 'User',
+            'email': user.email ?? '',
+            'phone': user.phoneNumber ?? '',
+            'profileImage': '',
+          });
+          _isLoading.add(false);
+          return;
+        }
+
+        final data = doc.data()!;
+        _userData.add({
+          'fullName': (data['fullName'] ?? 'User') as String,
+          'email': (data['email'] ?? user.email ?? '') as String,
+          'phone': (data['phone'] ?? user.phoneNumber ?? '') as String,
+          'profileImage': (data['profileImage'] ?? '') as String,
+        });
+        _isLoading.add(false);
+      },
+      onError: (_) => _isLoading.add(false),
+    );
   }
 
   Widget _menuTile(String title, {VoidCallback? onTap}) {
@@ -126,92 +138,130 @@ class _AccountScreenState extends State<AccountScreen> {
           titleSpacing: -8,
           automaticallyImplyLeading: false,
           leading: const SizedBox.shrink(),
-          title: const Text(
-            'Account',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-          ),
-          bottom: const PreferredSize(
-            preferredSize: Size.fromHeight(1),
-            child: Divider(height: 1, thickness: 1, color: Colors.white),
-          ),
+          title: const Text('Account', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+          bottom: const PreferredSize(preferredSize: Size.fromHeight(1), child: Divider(height: 1, thickness: 1, color: Colors.white)),
         ),
-        body: isLoading
-            ? const Center(child: CircularProgressIndicator(color: Colors.white))
-            : Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 36,
-                          backgroundColor: Colors.grey,
-                          backgroundImage: profileImage.isNotEmpty ? NetworkImage(profileImage) : null,
-                          child: profileImage.isEmpty
-                              ? const Icon(Icons.person, color: Colors.white, size: 40)
-                              : null,
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Text(
-                            fullName.isNotEmpty ? fullName : 'User',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 18,
-                                color: Colors.white),
+        body: StreamBuilder<bool>(
+          stream: _isLoading,
+          builder: (context, loadingSnap) {
+            final isLoading = loadingSnap.data ?? true;
+            return StreamBuilder<Map<String, dynamic>>(
+              stream: _userData,
+              builder: (context, userSnap) {
+                final data = userSnap.data ?? {};
+                final fullName = data['fullName'] ?? 'User';
+                final profileImage = data['profileImage'] ?? '';
+
+                return SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Profile Row
+                      Row(
+                        children: [
+                          Stack(
+                            children: [
+                              CircleAvatar(
+                                radius: 36,
+                                backgroundColor: Colors.grey,
+                                backgroundImage: profileImage.isNotEmpty ? NetworkImage(profileImage) : null,
+                                child: profileImage.isEmpty
+                                    ? const Icon(Icons.person, color: Colors.white, size: 40)
+                                    : null,
+                              ),
+                              if (isLoading)
+                                const Positioned.fill(
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    _menuTile('My Profile', onTap: () async {
-                      final updated = await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => MyProfileScreen(
-                            fullName: fullName,
-                            email: email,
-                            phone: phone,
-                            profileImage: profileImage,
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: isLoading
+                                ? const Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      _SkeletonLine(width: 120),
+                                      SizedBox(height: 4),
+                                      _SkeletonLine(width: 80),
+                                    ],
+                                  )
+                                : Text(
+                                    fullName,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+                                  ),
                           ),
-                        ),
-                      );
-                      if (updated == true) fetchUserData(); // ← Only refresh if needed
-                    }),
-                    _menuTile('Notifications', onTap: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
-                    }),
-                    _menuTile('Order History', onTap: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const PurchasesScreen(currentIndex: 2)));
-                    }),
-                    const Spacer(),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.white),
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: () async {
-                          await _auth.signOut();
-                          if (!mounted) return;
-                          Navigator.pushAndRemoveUntil(
-                            context,
-                            MaterialPageRoute(builder: (_) => const WelcomeScreen()),
-                            (route) => false,
-                          );
-                        },
-                        child: const Text('Log Out', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ],
                       ),
-                    ),
-                  ],
-                ),
-              ),
+                      const SizedBox(height: 24),
+
+                      // Menu Items
+                      _menuTile('My Profile', onTap: () async {
+                        final updated = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => MyProfileScreen(
+                              fullName: data['fullName'] ?? '',
+                              email: data['email'] ?? '',
+                              phone: data['phone'] ?? '',
+                              profileImage: data['profileImage'] ?? '',
+                            ),
+                          ),
+                        );
+                        if (updated == true) {
+                          HapticFeedback.lightImpact();
+                          _isLoading.add(true);
+                        }
+                      }),
+                      _menuTile('Notifications', onTap: () {
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+                      }),
+                      _menuTile('Order History', onTap: () {
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => const PurchasesScreen(currentIndex: 2)));
+                      }),
+
+                      // Push logout to bottom
+                      const Flexible(child: SizedBox(height: 32)),
+
+                      // Log Out Button
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.white),
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () async {
+                            HapticFeedback.mediumImpact();
+                            await _auth.signOut();
+                            if (!mounted) return;
+                            Navigator.pushAndRemoveUntil(
+                              context,
+                              MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+                              (route) => false,
+                            );
+                          },
+                          child: const Text('Log Out', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        ),
         bottomNavigationBar: Theme(
-          data: Theme.of(context).copyWith(
-              splashColor: Colors.transparent,
-              highlightColor: Colors.transparent),
+          data: Theme.of(context).copyWith(splashColor: Colors.transparent, highlightColor: Colors.transparent),
           child: BottomNavigationBar(
             type: BottomNavigationBarType.fixed,
             backgroundColor: Colors.white,
@@ -235,8 +285,6 @@ class _AccountScreenState extends State<AccountScreen> {
                 case 3:
                   Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const HelpScreen(currentIndex: 3), transitionDuration: Duration.zero));
                   break;
-                case 4:
-                  break;
               }
             },
             items: const [
@@ -253,8 +301,22 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 }
 
+class _SkeletonLine extends StatelessWidget {
+  final double width;
+  const _SkeletonLine({required this.width});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 12,
+      width: width,
+      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(4)),
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// MyProfileScreen
+// MyProfileScreen – WITH BEAUTIFUL EDITABLE PROFILE CARD
 // ─────────────────────────────────────────────────────────────────────────────
 
 class MyProfileScreen extends StatefulWidget {
@@ -280,29 +342,30 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
   final _firestore = FirebaseFirestore.instance;
   final _storage = FirebaseStorage.instance;
 
-  late TextEditingController fullNameController;
-  String? profileImageUrl;
-  bool isUploading = false;
-  bool isSaving = false;
+  late final TextEditingController _fullNameController;
+  final BehaviorSubject<String?> _profileImageUrl = BehaviorSubject.seeded(null);
+  final BehaviorSubject<bool> _isUploading = BehaviorSubject.seeded(false);
+  final BehaviorSubject<bool> _isSaving = BehaviorSubject.seeded(false);
 
   @override
   void initState() {
     super.initState();
-    profileImageUrl = widget.profileImage;
-    fullNameController = TextEditingController(text: widget.fullName);
+    _fullNameController = TextEditingController(text: widget.fullName);
+    _profileImageUrl.add(widget.profileImage.isNotEmpty ? widget.profileImage : null);
   }
 
   @override
   void dispose() {
-    fullNameController.dispose();
+    _fullNameController.dispose();
+    _profileImageUrl.close();
+    _isUploading.close();
+    _isSaving.close();
     super.dispose();
   }
 
   String _normalizeForComparison(String raw) {
     var s = raw.replaceAll(RegExp(r'[\s\-\(\)]'), '');
-    if (s.startsWith('0')) {
-      s = '+63' + s.substring(1);
-    }
+    if (s.startsWith('0')) s = '+63' + s.substring(1);
     return s;
   }
 
@@ -339,29 +402,20 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     final user = _auth.currentUser;
     if (user == null || !mounted) return;
 
-    setState(() => isUploading = true);
+    _isUploading.add(true);
     try {
       final ref = _storage.ref().child('profile_pictures/${user.uid}.jpg');
       await ref.putFile(file);
       final url = await ref.getDownloadURL();
-
       await _firestore.collection('users').doc(user.uid).update({'profileImage': url});
 
-      if (!mounted) return;
-      setState(() {
-        profileImageUrl = url;
-        isUploading = false;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile picture updated')),
-      );
+      _profileImageUrl.add(url);
+      _isUploading.add(false);
+      HapticFeedback.lightImpact();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile picture updated')));
     } catch (e) {
-      if (!mounted) return;
-      setState(() => isUploading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Upload failed: $e')),
-      );
+      _isUploading.add(false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Upload failed')));
     }
   }
 
@@ -369,29 +423,22 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     final user = _auth.currentUser;
     if (user == null || !mounted) return;
 
-    final name = fullNameController.text.trim();
+    final name = _fullNameController.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Name cannot be empty')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name cannot be empty')));
       return;
     }
 
-    setState(() => isSaving = true);
+    _isSaving.add(true);
     try {
       await _firestore.collection('users').doc(user.uid).update({'fullName': name});
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile updated!')),
-      );
-      Navigator.pop(context, true); // Signal refresh
+      HapticFeedback.mediumImpact();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated!')));
+      Navigator.pop(context, true);
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Update failed: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Update failed')));
     } finally {
-      if (mounted) setState(() => isSaving = false);
+      _isSaving.add(false);
     }
   }
 
@@ -403,7 +450,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     Navigator.push(context, MaterialPageRoute(builder: (_) => const ManageAddressScreen()));
   }
 
-  @override
+    @override
   Widget build(BuildContext context) {
     final phoneLinked = _isPhoneLinked;
     final currentUser = _auth.currentUser;
@@ -425,26 +472,76 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // ── PROFILE PICTURE WITH CAMERA ICON & "TAP TO CHANGE" ──
             GestureDetector(
-              onTap: isUploading ? null : pickAndCropImage,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  CircleAvatar(
-                    radius: 50,
-                    backgroundColor: Colors.grey,
-                    backgroundImage: profileImageUrl != null && profileImageUrl!.isNotEmpty
-                        ? NetworkImage(profileImageUrl!)
-                        : null,
-                    child: (profileImageUrl == null || profileImageUrl!.isEmpty)
-                        ? const Icon(Icons.person, size: 50, color: Colors.white)
-                        : null,
-                  ),
-                  if (isUploading)
-                    const Positioned.fill(
-                      child: Center(child: CircularProgressIndicator(color: Colors.white)),
-                    ),
-                ],
+              onTap: pickAndCropImage,
+              child: StreamBuilder<String?>(
+                stream: _profileImageUrl,
+                builder: (context, snap) {
+                  final url = snap.data;
+                  return Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      CircleAvatar(
+                        radius: 50,
+                        backgroundColor: Colors.grey,
+                        backgroundImage: url != null && url.isNotEmpty ? NetworkImage(url) : null,
+                        child: (url == null || url.isEmpty)
+                            ? const Icon(Icons.person, size: 50, color: Colors.white)
+                            : null,
+                      ),
+                      // Camera Icon (Always visible)
+                      Positioned(
+                        bottom: 0,
+                        right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF052238),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.camera_alt, size: 18, color: Colors.white),
+                        ),
+                      ),
+                      // "Tap to change" (Only when no image)
+                      if (url == null || url.isEmpty)
+                        Positioned(
+                          bottom: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.6),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: const Text(
+                              'Tap to change',
+                              style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ),
+                      // Uploading Spinner
+                      StreamBuilder<bool>(
+                        stream: _isUploading,
+                        builder: (context, upSnap) {
+                          return upSnap.data == true
+                              ? const Positioned.fill(
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 32,
+                                      height: 32,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 3,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : const SizedBox();
+                        },
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
             const SizedBox(height: 24),
@@ -457,7 +554,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 child: TextField(
-                  controller: fullNameController,
+                  controller: _fullNameController,
                   decoration: const InputDecoration(labelText: 'Full Name', border: InputBorder.none),
                 ),
               ),
@@ -507,19 +604,25 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
             const SizedBox(height: 16),
 
             // Save Button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: isSaving ? null : _saveProfile,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: const Color(0xFF052238),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                child: isSaving
-                    ? const CircularProgressIndicator(color: Color(0xFF052238))
-                    : const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
+            StreamBuilder<bool>(
+              stream: _isSaving,
+              builder: (context, saveSnap) {
+                final isSaving = saveSnap.data ?? false;
+                return SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: isSaving ? null : _saveProfile,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFF052238),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: isSaving
+                        ? const CircularProgressIndicator(color: Color(0xFF052238))
+                        : const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                );
+              },
             ),
 
             const SizedBox(height: 16),

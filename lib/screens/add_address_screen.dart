@@ -7,11 +7,14 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'map_picker_screen.dart';
 
 class AddAddressScreen extends StatefulWidget {
-  const AddAddressScreen({super.key, this.editMode = false, this.address, this.addressId});
+  const AddAddressScreen({
+    super.key,
+    this.editMode = false,
+    this.address,
+  });
 
   final bool editMode;
   final Map<String, dynamic>? address;
-  final String? addressId; // ← NEW: Unique ID for editing
 
   @override
   State<AddAddressScreen> createState() => _AddAddressScreenState();
@@ -30,6 +33,13 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
   LatLng? _selectedLocation;
 
   final String _uid = FirebaseAuth.instance.currentUser!.uid;
+
+  LatLng _roundLatLng(LatLng latLng) {
+    return LatLng(
+      double.parse(latLng.latitude.toStringAsFixed(5)),
+      double.parse(latLng.longitude.toStringAsFixed(5)),
+    );
+  }
 
   @override
   void initState() {
@@ -82,9 +92,12 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
       }
 
       final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      _selectedLocation = LatLng(pos.latitude, pos.longitude);
+      final rawLatLng = LatLng(pos.latitude, pos.longitude);
+      final roundedLatLng = _roundLatLng(rawLatLng);
 
-      final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
+      _selectedLocation = roundedLatLng;
+
+      final placemarks = await placemarkFromCoordinates(roundedLatLng.latitude, roundedLatLng.longitude);
       if (placemarks.isNotEmpty && mounted) {
         final p = placemarks.first;
         setState(() {
@@ -108,10 +121,12 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(title),
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
         content: Text(content),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
@@ -121,7 +136,7 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
                 await Geolocator.openAppSettings();
               }
             },
-            child: const Text('Open Settings'),
+            child: const Text('Open Settings', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -129,74 +144,97 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
   }
 
   Future<void> _pickOnMap() async {
-  final result = await Navigator.push(
-    context,
-    MaterialPageRoute(builder: (_) => const MapPickerScreen()),
-  );
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const MapPickerScreen()),
+    );
 
-  if (result is LatLng && mounted) {
-    _selectedLocation = result;
-    setState(() => _isFetchingLocation = true);
+    if (result is LatLng && mounted) {
+      final roundedLatLng = _roundLatLng(result);
+      _selectedLocation = roundedLatLng;
+      setState(() => _isFetchingLocation = true);
 
-    try {
-      final placemarks = await placemarkFromCoordinates(result.latitude, result.longitude);
-      if (placemarks.isNotEmpty && mounted) {
-        final p = placemarks.first;
-        setState(() {
-          _street.text = p.street ?? '';
-          _barangay.text = p.subLocality ?? '';
-          _city.text = p.locality ?? '';
-          _province.text = p.administrativeArea ?? '';
-          _postal.text = p.postalCode ?? '';
-        });
+      try {
+        final placemarks = await placemarkFromCoordinates(roundedLatLng.latitude, roundedLatLng.longitude);
+        if (placemarks.isNotEmpty && mounted) {
+          final p = placemarks.first;
+          setState(() {
+            _street.text = p.street ?? '';
+            _barangay.text = p.subLocality ?? '';
+            _city.text = p.locality ?? '';
+            _province.text = p.administrativeArea ?? '';
+            _postal.text = p.postalCode ?? '';
+          });
+        }
+      } catch (e) {
+        debugPrint('Reverse geocoding failed: $e');
+      } finally {
+        if (mounted) setState(() => _isFetchingLocation = false);
       }
-    } catch (e) {
-      debugPrint('Reverse geocoding failed: $e');
-    } finally {
-      if (mounted) setState(() => _isFetchingLocation = false);
     }
   }
-}
 
   Future<void> _saveAddress() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_selectedLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a location')),
+      );
+      return;
+    }
 
-    if (mounted) setState(() => _isSaving = true);
+    setState(() => _isSaving = true);
 
     try {
       final userRef = FirebaseFirestore.instance.collection('users').doc(_uid);
       final snapshot = await userRef.get();
-      List<dynamic> current = List.from(snapshot.data()?['addresses'] ?? []);
+      List<dynamic> currentAddresses = List.from(snapshot.data()?['addresses'] ?? []);
 
-      final newAddress = {
+      final roundedLatLng = _roundLatLng(_selectedLocation!);
+
+      // Preserve isActive from the original address being edited
+      final bool isActive = widget.editMode ? (widget.address?['isActive'] ?? false) : false;
+
+      final Map<String, dynamic> updatedAddress = {
         'street': _street.text.trim(),
         'barangay': _barangay.text.trim(),
         'city': _city.text.trim(),
         'province': _province.text.trim(),
         'postal': _postal.text.trim(),
-        'isActive': false,
-        'lat': _selectedLocation?.latitude,
-        'lng': _selectedLocation?.longitude,
+        'isActive': isActive,
+        'lat': roundedLatLng.latitude,
+        'lng': roundedLatLng.longitude,
       };
 
-      if (widget.editMode && widget.addressId != null) {
-        final idx = current.indexWhere((a) => a['id'] == widget.addressId);
-        if (idx != -1) {
-          current[idx] = {...current[idx], ...newAddress, 'id': widget.addressId};
+      if (widget.editMode && widget.address != null) {
+        // Find and REPLACE the old address using lat/lng match
+        final int index = currentAddresses.indexWhere((a) {
+          final map = a as Map<String, dynamic>;
+          return map['lat'] == widget.address!['lat'] && map['lng'] == widget.address!['lng'];
+        });
+
+        if (index != -1) {
+          currentAddresses[index] = updatedAddress;
         } else {
-          newAddress['id'] = widget.addressId;
-          current.add(newAddress);
+          // Fallback: add as new (shouldn't happen)
+          currentAddresses.add(updatedAddress);
         }
       } else {
-        newAddress['id'] = DateTime.now().millisecondsSinceEpoch.toString();
-        current.add(newAddress);
+        // Add new address
+        currentAddresses.add(updatedAddress);
       }
 
-      await userRef.update({'addresses': current});
-      if (mounted) Navigator.pop(context, true);
+      await userRef.update({'addresses': currentAddresses});
+
+      // RETURN THE FULL MAP SO MANAGE SCREEN CAN UPDATE IN PLACE
+      if (mounted) {
+        Navigator.pop(context, updatedAddress);
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save: $e')),
+        );
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -296,7 +334,12 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
                     children: [
                       const Icon(Icons.location_on, color: Colors.green, size: 20),
                       const SizedBox(width: 8),
-                      Expanded(child: Text('Location pinned on map', style: const TextStyle(color: Colors.white70, fontSize: 13))),
+                      Expanded(
+                        child: Text(
+                          'Location pinned: ${_selectedLocation!.latitude.toStringAsFixed(5)}, ${_selectedLocation!.longitude.toStringAsFixed(5)}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                      ),
                       TextButton(
                         onPressed: _pickOnMap,
                         child: const Text('Change', style: TextStyle(color: Colors.blue)),

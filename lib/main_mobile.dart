@@ -1,4 +1,6 @@
 // lib/main_mobile.dart
+import 'dart:convert'; // ← ADDED FOR JSON
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -14,7 +16,8 @@ import 'package:daligas/screens/signup_screen.dart';
 import 'package:daligas/screens/signin_screen.dart';
 import 'package:daligas/screens/chat_screen.dart';
 import 'package:daligas/screens/order_details_screen.dart';
-import 'package:daligas/screens/home_screen.dart'; // ← ADD THIS
+import 'package:daligas/screens/home_screen.dart';
+import 'package:daligas/screens/employee_orders_screen.dart';
 
 // ------------------------------------------------------------
 // Global Navigator Key
@@ -56,7 +59,6 @@ Future<void> main() async {
     androidProvider:
         kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
   );
-
   FirebaseAppCheck.instance.setTokenAutoRefreshEnabled(true);
 
   // Firebase Messaging
@@ -71,10 +73,14 @@ Future<void> main() async {
     initSettings,
     onDidReceiveNotificationResponse: (details) {
       final payload = details.payload;
-      if (payload != null) {
-        final data = Map<String, dynamic>.from(
-            payload.split('|').asMap().map((k, v) => MapEntry(v.split(':')[0], v.split(':')[1])));
-        _handleNotificationTap(RemoteMessage(data: data));
+      if (payload != null && payload.isNotEmpty) {
+        try {
+          final data = jsonDecode(payload) as Map<String, dynamic>;
+          final remoteMessage = RemoteMessage(data: data);
+          _handleNotificationTap(remoteMessage);
+        } catch (e) {
+          if (kDebugMode) print("Failed to parse notification payload: $e");
+        }
       }
     },
   );
@@ -126,7 +132,7 @@ Future<void> main() async {
     bool allowed = false;
     if (type == 'order' && (prefs['orderUpdates'] ?? true)) allowed = true;
     if (type == 'delivery' && (prefs['deliveryReminders'] ?? true)) allowed = true;
-    if (type == 'chat' && (prefs['chatMessages'] ?? true)) allowed = true;
+    if (type == 'message' && (prefs['chatMessages'] ?? true)) allowed = true;
     if (type == 'promo' && (prefs['promotions'] ?? false)) allowed = true;
     if (type == 'general') allowed = true;
 
@@ -136,7 +142,14 @@ Future<void> main() async {
     }
 
     if (notification != null) {
-      final payload = 'type:${data['type']}|chatId:${data['chatId'] ?? ''}|orderId:${data['orderId'] ?? ''}';
+      // Use JSON payload
+      final payload = jsonEncode({
+        'type': type,
+        'chatId': data['chatId'] ?? '',
+        'orderId': data['orderId'] ?? '',
+        'title': data['title'] ?? notification.title,
+      });
+
       await flutterLocalNotificationsPlugin.show(
         0,
         notification.title,
@@ -188,75 +201,87 @@ Future<void> main() async {
 }
 
 // ------------------------------------------------------------
-// Handle Notification Tap
+// Handle Notification Tap (UPDATED FOR CHAT + EMPLOYEE)
 // ------------------------------------------------------------
 Future<void> _handleNotificationTap(RemoteMessage message) async {
   final data = message.data;
   final type = data['type'];
   final context = navigatorKey.currentContext;
-  if (context == null) return;
+  if (context == null || !context.mounted) return;
 
+  // === CHAT MESSAGE NOTIFICATION ===
   if (type == 'message' && data['chatId'] != null) {
+    final chatId = data['chatId'] as String;
+    final orderId = data['orderId'] is String ? data['orderId'] as String : null;
+    final title = data['title'] as String? ?? 'Chat';
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    bool isEmployee = false;
+    final empDoc = await FirebaseFirestore.instance
+        .collection('employees')
+        .doc(user.uid)
+        .get();
+    if (empDoc.exists && empDoc.data()?['role'] == 'employee') {
+      isEmployee = true;
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ChatScreen(
-          chatId: data['chatId'],
-          title: data['title'] ?? 'Chat',
-          isEmployee: false,
+          chatId: chatId,
+          title: title,
+          isEmployee: isEmployee,
+          orderId: orderId,
         ),
       ),
     );
-  } else if (type == 'order' && data['orderId'] != null) {
-  final orderId = data['orderId'];
-  final context = navigatorKey.currentContext;
-  if (context == null) return;
+    return;
+  }
 
-  try {
-    final orderDoc = await FirebaseFirestore.instance
-        .collection('orders')
-        .doc(orderId)
-        .get();
+  // === ORDER NOTIFICATION ===
+  if (type == 'order' && data['orderId'] != null) {
+    final orderId = data['orderId'] as String;
 
-    if (!orderDoc.exists) {
-      if (context.mounted) {
+    try {
+      final orderDoc = await FirebaseFirestore.instance
+          .collection('orders')
+          .doc(orderId)
+          .get();
+
+      if (!orderDoc.exists) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Order not found')),
         );
+        return;
       }
-      return;
-    }
 
-    final orderData = orderDoc.data()!;
+      final orderData = orderDoc.data()!;
+      final itemsSnap = await FirebaseFirestore.instance
+          .collection('orders')
+          .doc(orderId)
+          .collection('items')
+          .get();
+      final items = itemsSnap.docs.map((doc) => doc.data()).toList();
 
-    final itemsSnap = await FirebaseFirestore.instance
-        .collection('orders')
-        .doc(orderId)
-        .collection('items')
-        .get();
-
-    final items = itemsSnap.docs.map((doc) => doc.data()).toList();
-
-    if (!context.mounted) return;
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => OrderDetailsScreen(
-          orderId: orderId,
-          orderData: orderData,
-          items: items,
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => OrderDetailsScreen(
+            orderId: orderId,
+            orderData: orderData,
+            items: items,
+          ),
         ),
-      ),
-    );
-  } catch (e) {
-    if (context.mounted) {
+      );
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to load order: $e')),
       );
     }
   }
-}
 }
 
 // ------------------------------------------------------------
@@ -269,12 +294,18 @@ Future<void> saveFcmToken(User user, {String? newToken}) async {
   String collection = 'users';
   String? role;
 
-  final empDoc = await FirebaseFirestore.instance.collection('employees').doc(user.uid).get();
+  final empDoc = await FirebaseFirestore.instance
+      .collection('employees')
+      .doc(user.uid)
+      .get();
   if (empDoc.exists) {
     role = empDoc.data()?['role'] as String?;
     if (role == 'employee') collection = 'employees';
   } else {
-    final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
     if (userDoc.exists) {
       role = userDoc.data()?['role'] as String?;
       if (role == 'employee') collection = 'employees';
@@ -316,7 +347,7 @@ Future<void> saveFcmToken(User user, {String? newToken}) async {
 }
 
 // ------------------------------------------------------------
-// MAIN APP WITH AUTH WRAPPER (PERSISTENT LOGIN)
+// MAIN APP
 // ------------------------------------------------------------
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -331,7 +362,7 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: const AuthWrapper(), // ← REPLACES WelcomeScreen
+      home: const AuthWrapper(),
       routes: {
         '/signin': (context) => const SignInScreen(),
         '/signup': (context) => const SignUpScreen(),
@@ -341,17 +372,29 @@ class MyApp extends StatelessWidget {
 }
 
 // ------------------------------------------------------------
-// AUTH WRAPPER: DECIDES WHERE TO GO BASED ON LOGIN STATE
+// AUTH WRAPPER – ROLE-AWARE
 // ------------------------------------------------------------
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
+
+  Future<Widget> _getHomeScreen(User user) async {
+    final empDoc = await FirebaseFirestore.instance
+        .collection('employees')
+        .doc(user.uid)
+        .get();
+
+    if (empDoc.exists && (empDoc.data()?['role'] as String?) == 'employee') {
+      return const EmployeeOrdersScreen();
+    }
+
+    return const HomeScreen();
+  }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        // Still checking
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             backgroundColor: Color(0xFF0D2236),
@@ -361,12 +404,30 @@ class AuthWrapper extends StatelessWidget {
           );
         }
 
-        // User is logged in → go to Home
-        if (snapshot.hasData) {
-          return const HomeScreen();
+        if (snapshot.hasData && snapshot.data != null) {
+          final user = snapshot.data!;
+
+          return FutureBuilder<Widget>(
+            future: _getHomeScreen(user),
+            builder: (context, homeSnapshot) {
+              if (homeSnapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  backgroundColor: Color(0xFF0D2236),
+                  body: Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  ),
+                );
+              }
+
+              if (homeSnapshot.hasData) {
+                return homeSnapshot.data!;
+              }
+
+              return const HomeScreen();
+            },
+          );
         }
 
-        // No user → show Welcome
         return const WelcomeScreen();
       },
     );

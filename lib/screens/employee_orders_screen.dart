@@ -1,6 +1,11 @@
+
+
+// UPDATED SCREEN //
 import 'dart:ui' as ui;
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform, exit;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -12,10 +17,11 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:collection/collection.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:rxdart/rxdart.dart'; // ← RxDart added
 import 'package:daligas/screens/employee_account_screen.dart';
 import 'package:daligas/screens/chat_screen.dart';
+import 'package:flutter/services.dart'; // For SystemNavigator
 
-// REPLACE WITH YOUR GOOGLE MAPS API KEY
 const String GOOGLE_MAPS_API_KEY = 'AIzaSyAVDDHYb29rt4io-HI0Uq6vfv_GAnlDLlw';
 
 class EmployeeOrdersScreen extends StatefulWidget {
@@ -27,69 +33,126 @@ class EmployeeOrdersScreen extends StatefulWidget {
 }
 
 class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final TabController _tabController;
   final User? _employee = FirebaseAuth.instance.currentUser;
   Position? _currentPosition;
   Timer? _locationThrottle;
+  StreamSubscription<Position>? _positionStream;
+
+  DateTime? _lastBackPress; // Double back-press
+
+  // RxDart: Live badge counters
+  late final BehaviorSubject<int> _pendingCountSubject;
+  late final BehaviorSubject<int> _completedCountSubject;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    WidgetsBinding.instance.addObserver(this);
+
+    _pendingCountSubject = BehaviorSubject<int>.seeded(0);
+    _completedCountSubject = BehaviorSubject<int>.seeded(0);
+
     _initLocation();
+    _listenToOrderChanges(); // Reactive listener
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     _locationThrottle?.cancel();
+    _positionStream?.cancel(); // ← ADD THIS
+    _pendingCountSubject.close();
+    _completedCountSubject.close();
     super.dispose();
   }
 
-  Future<void> _initLocation() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      _showLocationServiceDialog();
-      return;
-    }
-
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        _showPermissionDeniedDialog();
-        return;
-      }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      _showPermissionPermanentlyDeniedDialog();
-      return;
-    }
-
-    try {
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-      setState(() => _currentPosition = position);
-
-      Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 50,
-        ),
-      ).listen((pos) {
-        if (_locationThrottle?.isActive ?? false) return;
-        _locationThrottle = Timer(const Duration(seconds: 30), () {});
-
-        setState(() => _currentPosition = pos);
-        _updateDriverLocation(pos);
-      });
-    } catch (e) {
-      debugPrint('Location init failed: $e');
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _initLocation();
     }
   }
+
+  // Reactive order count updates
+  void _listenToOrderChanges() {
+    if (_employee == null) return;
+
+    FirebaseFirestore.instance
+        .collection('orders')
+        .where('employeeId', isEqualTo: _employee!.uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen((snapshot) {
+      final orders = snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+
+      final pending = orders.where((o) => o['deliveryStatus'] == 'Processing' || o['deliveryStatus'] == 'Shipped').length;
+      final completed = orders.where((o) => o['deliveryStatus'] == 'Delivered').length;
+
+      _pendingCountSubject.add(pending);
+      _completedCountSubject.add(completed);
+    });
+  }
+
+  Future<void> _initLocation() async {
+  bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+  if (!serviceEnabled) {
+    _showLocationServiceDialog();
+    return;
+  }
+
+  LocationPermission permission = await Geolocator.checkPermission();
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
+    if (permission == LocationPermission.denied) {
+      _showPermissionDeniedDialog();
+      return;
+    }
+  }
+
+  if (permission == LocationPermission.deniedForever) {
+    _showPermissionPermanentlyDeniedDialog();
+    return;
+  }
+
+  try {
+    // Cancel any existing stream
+    await _positionStream?.cancel();
+    _positionStream = null;
+
+    Position position = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+
+    if (!mounted) return;
+    setState(() => _currentPosition = position);
+
+    // Start new stream
+    _positionStream = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 50,
+      ),
+    ).listen((pos) {
+      if (!mounted) return;
+      if (_locationThrottle?.isActive ?? false) return;
+
+      _locationThrottle = Timer(const Duration(seconds: 30), () {});
+
+      setState(() => _currentPosition = pos);
+      _updateDriverLocation(pos);
+    });
+  } catch (e) {
+    debugPrint('Location init failed: $e');
+  }
+}
 
   void _updateDriverLocation(Position position) {
     if (_employee == null) return;
@@ -110,16 +173,6 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
         }).catchError((e) => debugPrint('Update failed: $e'));
       }
     });
-  }
-
-  Stream<QuerySnapshot<Map<String, dynamic>>> _ordersStream() {
-    if (_employee == null) return const Stream.empty();
-
-    return FirebaseFirestore.instance
-        .collection('orders')
-        .where('employeeId', isEqualTo: _employee!.uid)
-        .orderBy('createdAt', descending: true)
-        .snapshots();
   }
 
   Color _statusColor(String status) {
@@ -246,7 +299,7 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.inbox_outlined, size: 60, color: Colors.white54),
+            Icon(Icons.inbox, size: 60, color: Colors.white54),
             const SizedBox(height: 16),
             Text(msg, style: const TextStyle(color: Colors.white70, fontSize: 16), textAlign: TextAlign.center),
           ],
@@ -280,14 +333,20 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
       );
 
   void _showLocationServiceDialog() {
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (_) => AlertDialog(
         title: const Text("Location Disabled"),
         content: const Text("Please enable location services to track deliveries."),
         actions: [
           TextButton(
-            onPressed: () => Geolocator.openLocationSettings(),
+            onPressed: () async {
+              Navigator.pop(context);
+              await Geolocator.openLocationSettings();
+            },
             child: const Text("Open Settings"),
           ),
         ],
@@ -322,72 +381,164 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
     );
   }
 
+  // Double back-press to exit
+  Future<bool> _onWillPop() async {
+    final now = DateTime.now();
+    if (_lastBackPress == null || now.difference(_lastBackPress!) > const Duration(seconds: 2)) {
+      _lastBackPress = now;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Press back again to exit'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.black87,
+        ),
+      );
+      return false;
+    }
+    if (Platform.isAndroid) {
+      SystemNavigator.pop();
+    } else {
+      exit(0);
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF052238),
-      appBar: AppBar(
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: Scaffold(
         backgroundColor: const Color(0xFF052238),
-        elevation: 0,
-        titleSpacing: -8,
-        leading: const SizedBox.shrink(),
-        title: const Text('My Shipments', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        bottom: const PreferredSize(preferredSize: Size.fromHeight(1), child: Divider(height: 1, thickness: 1, color: Colors.white24)),
-      ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _ordersStream(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: Colors.white));
-          }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return _empty('No orders assigned to you');
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF052238),
+          elevation: 0,
+          titleSpacing: -8,
+          leading: const SizedBox.shrink(),
+          title: const Text('My Shipments', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+          bottom: const PreferredSize(preferredSize: Size.fromHeight(1), child: Divider(height: 1, thickness: 1, color: Colors.white24)),
+        ),
+        body: StreamBuilder<QuerySnapshot>(
+          stream: _employee != null
+              ? FirebaseFirestore.instance
+                  .collection('orders')
+                  .where('employeeId', isEqualTo: _employee!.uid)
+                  .orderBy('createdAt', descending: true)
+                  .snapshots()
+              : const Stream.empty(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator(color: Colors.white));
+            }
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              return _empty('No orders assigned to you');
+            }
 
-          final orders = snapshot.data!.docs.map((doc) {
-            final data = doc.data();
-            data['id'] = doc.id;
-            return data;
-          }).toList();
+            final orders = snapshot.data!.docs.map((doc) {
+              final data = doc.data()! as Map<String, dynamic>;
+              data['id'] = doc.id;
+              return data;
+            }).toList();
 
-          final processing = orders.where((o) => o['deliveryStatus'] == 'Processing').toList();
-          final shipped = orders.where((o) => o['deliveryStatus'] == 'Shipped').toList();
-          final completed = orders.where((o) => o['deliveryStatus'] == 'Delivered').toList();
-          final pending = [...processing, ...shipped];
+            final pending = orders.where((o) => o['deliveryStatus'] == 'Processing' || o['deliveryStatus'] == 'Shipped').toList();
+            final completed = orders.where((o) => o['deliveryStatus'] == 'Delivered').toList();
 
-          return Column(
-            children: [
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2))]),
-                child: TabBar(
-                  controller: _tabController,
-                  labelColor: const Color(0xFF052238),
-                  unselectedLabelColor: Colors.black54,
-                  labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  indicator: BoxDecoration(color: const Color(0xFFe6eef7), borderRadius: BorderRadius.circular(12)),
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  tabs: const [Tab(text: 'Pending'), Tab(text: 'Completed')],
+            return Column(
+              children: [
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2))],
+                  ),
+                  child: TabBar(
+                    controller: _tabController,
+                    labelColor: const Color(0xFF052238),
+                    unselectedLabelColor: Colors.black54,
+                    labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    indicator: BoxDecoration(color: const Color(0xFFe6eef7), borderRadius: BorderRadius.circular(12)),
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    tabs: [
+                      // Pending Tab with Live Badge
+                      Tab(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Text('Pending'),
+                            const SizedBox(width: 6),
+                            StreamBuilder<int>(
+                              stream: _pendingCountSubject.stream,
+                              builder: (context, snapshot) {
+                                final count = snapshot.data ?? 0;
+                                if (count == 0) return const SizedBox();
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '$count',
+                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Completed Tab with Live Badge
+                      Tab(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Text('Completed'),
+                            const SizedBox(width: 6),
+                            StreamBuilder<int>(
+                              stream: _completedCountSubject.stream,
+                              builder: (context, snapshot) {
+                                final count = snapshot.data ?? 0;
+                                if (count == 0) return const SizedBox();
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '$count',
+                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    pending.isEmpty ? _empty('No pending orders') : ListView.builder(padding: const EdgeInsets.only(top: 8), itemCount: pending.length, itemBuilder: (_, i) => _buildOrderCard(pending[i])),
-                    completed.isEmpty ? _empty('No completed orders') : ListView.builder(padding: const EdgeInsets.only(top: 8), itemCount: completed.length, itemBuilder: (_, i) => _buildOrderCard(completed[i])),
-                  ],
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      pending.isEmpty ? _empty('No pending orders') : ListView.builder(padding: const EdgeInsets.only(top: 8), itemCount: pending.length, itemBuilder: (_, i) => _buildOrderCard(pending[i])),
+                      completed.isEmpty ? _empty('No completed orders') : ListView.builder(padding: const EdgeInsets.only(top: 8), itemCount: completed.length, itemBuilder: (_, i) => _buildOrderCard(completed[i])),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+          },
+        ),
+        bottomNavigationBar: _bottomNav(),
       ),
-      bottomNavigationBar: _bottomNav(),
     );
   }
 }
 
 // ================================================================
-// BOTTOM-SHEET: WAZE-STYLE ROUTE + CONSISTENT TRUCK ICON
+// BOTTOM-SHEET: WAZE-STYLE + NAVIGATION BUTTON
 // ================================================================
 class _OrderActionsSheet extends StatefulWidget {
   final String orderId;
@@ -418,11 +569,14 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
   GoogleMapController? _mapController;
   LatLng _driverLocation = const LatLng(14.5995, 120.9842);
   LatLng _customerLocation = const LatLng(14.5995, 120.9842);
+  LatLng? _previousLocation;
   String? _customerPhone;
   bool _isGeocoding = false;
   bool _isIconLoaded = false;
   bool _isRouteLoading = false;
+  bool isConfirmingDelivery = false;
   Set<Polyline> _polylines = {};
+  Set<Marker> _markers = {};
   String _routeInfo = '';
 
   static BitmapDescriptor? _cachedTruckIcon;
@@ -477,12 +631,17 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
       if (lat == null || lng == null) return;
 
       final newLoc = LatLng(lat as double, lng as double);
-      final oldLoc = _driverLocation;
 
-      setState(() => _driverLocation = newLoc);
+      setState(() {
+        _previousLocation = _driverLocation;
+        _driverLocation = newLoc;
+        _updateMarkers();
+      });
 
-      if (_customerLocation.latitude != 14.5995 && _customerLocation.longitude != 120.9842 &&
-          (oldLoc.latitude != newLoc.latitude || oldLoc.longitude != newLoc.longitude)) {
+      if (_customerLocation.latitude != 14.5995 &&
+          (_previousLocation == null ||
+              _previousLocation!.latitude != newLoc.latitude ||
+              _previousLocation!.longitude != newLoc.longitude)) {
         _fetchRoute();
       }
 
@@ -490,14 +649,44 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
     });
   }
 
+  void _updateMarkers() {
+    double rotation = 0;
+    if (_previousLocation != null) {
+      rotation = Geolocator.bearingBetween(
+        _previousLocation!.latitude,
+        _previousLocation!.longitude,
+        _driverLocation.latitude,
+        _driverLocation.longitude,
+      );
+    }
+
+    _markers = {
+      Marker(
+        markerId: const MarkerId('customer'),
+        position: _customerLocation,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      ),
+      if (_isIconLoaded && _cachedTruckIcon != null)
+        Marker(
+          markerId: const MarkerId('driver'),
+          position: _driverLocation,
+          icon: _cachedTruckIcon!,
+          anchor: const Offset(0.5, 0.5),
+          rotation: rotation,
+          zIndex: 10,
+        ),
+    };
+  }
+
   void _loadCustomerLocation() async {
     final lat = widget.orderData['customerLatLng']?['lat'];
     final lng = widget.orderData['customerLatLng']?['lng'];
     if (lat != null && lng != null) {
-      setState(() => _customerLocation = LatLng(lat as double, lng as double));
-      if (_driverLocation.latitude != 14.5995) {
-        _fetchRoute();
-      }
+      setState(() {
+        _customerLocation = LatLng(lat as double, lng as double);
+        _updateMarkers();
+      });
+      if (_driverLocation.latitude != 14.5995) _fetchRoute();
       return;
     }
 
@@ -508,9 +697,11 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
       if (locations.isNotEmpty) {
         final loc = locations.first;
         final newCustomerLoc = LatLng(loc.latitude, loc.longitude);
-        setState(() => _customerLocation = newCustomerLoc);
+        setState(() {
+          _customerLocation = newCustomerLoc;
+          _updateMarkers();
+        });
 
-        // Save to Firestore
         await FirebaseFirestore.instance
             .collection('orders')
             .doc(widget.orderId)
@@ -518,9 +709,7 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
           'customerLatLng': {'lat': loc.latitude, 'lng': loc.longitude}
         });
 
-        if (_driverLocation.latitude != 14.5995) {
-          _fetchRoute();
-        }
+        if (_driverLocation.latitude != 14.5995) _fetchRoute();
       }
     } catch (e) {
       debugPrint('Geocoding failed: $e');
@@ -548,9 +737,6 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
 
     try {
       final response = await http.get(url).timeout(const Duration(seconds: 10));
-      debugPrint('Directions URL: $url');
-      debugPrint('Response: ${response.statusCode}');
-
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'OK' && data['routes'].isNotEmpty) {
@@ -569,20 +755,15 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
                 points: points,
                 color: Colors.blue,
                 width: 5,
-                patterns: [PatternItem.dash(30), PatternItem.gap(10)],
               ),
             };
           });
 
           _fitRouteOnMap(points);
-        } else {
-          debugPrint('API Error: ${data['status']} - ${data['error_message']}');
-          _showError('No route found');
         }
       }
     } catch (e) {
       debugPrint('Route fetch failed: $e');
-      _showError('Failed to load route');
     } finally {
       setState(() => _isRouteLoading = false);
     }
@@ -639,16 +820,88 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
     return points;
   }
 
-  void _showError(String msg) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  void _launchNavigation() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hasSeenTip = prefs.getBool('nav_tip_shown') ?? false;
+
+    if (!hasSeenTip && mounted) {
+      await prefs.setBool('nav_tip_shown', true);
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Navigation Tip', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: const Text(
+            'We\'ll open Waze first (best for PH traffic).\n\n'
+            'If Waze is not installed, Google Maps will open automatically.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Got it!', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) return;
+    }
+
+    final originLat = _driverLocation.latitude;
+    final originLng = _driverLocation.longitude;
+    final destLat = _customerLocation.latitude;
+    final destLng = _customerLocation.longitude;
+
+    final wazeUri = Uri.parse('waze://?ll=$destLat,$destLng&navigate=yes');
+    final googleUri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1'
+      '&origin=$originLat,$originLng'
+      '&destination=$destLat,$destLng'
+      '&travelmode=driving'
+      '&dir_action=navigate',
+    );
+
+    bool opened = false;
+
+    try {
+      opened = await launchUrl(wazeUri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+
+    if (!opened) {
+      try {
+        await launchUrl(googleUri, mode: LaunchMode.externalApplication);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Waze not found. Opening Google Maps...'),
+              backgroundColor: Colors.blue,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Opening in browser...')),
+          );
+        }
+      }
     }
   }
 
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: Colors.red),
+    );
+  }
+
   String _shortOrderId(String fullId) {
-  if (fullId.length <= 5) return fullId;
-  return fullId.substring(fullId.length - 5);
-}
+    if (fullId.length <= 5) return fullId;
+    return fullId.substring(fullId.length - 5);
+  }
 
   Future<void> _confirmOrder() async {
     try {
@@ -669,16 +922,23 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
   }
 
   Future<void> _confirmDelivery() async {
-    try {
-      final orderRef = FirebaseFirestore.instance.collection('orders').doc(widget.orderId);
-      await orderRef.update({'deliveryStatus': 'Delivered'});
-      await _notifyCustomer('Delivered', 'Order #${widget.orderId} has been delivered.');
-      widget.onStatusChanged();
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to confirm: $e')));
+  if (isConfirmingDelivery) return; // Prevent double tap
+  setState(() => isConfirmingDelivery = true);
+
+  try {
+    final orderRef = FirebaseFirestore.instance.collection('orders').doc(widget.orderId);
+    await orderRef.update({'deliveryStatus': 'Delivered'});
+    await _notifyCustomer('Delivered', 'Order #${widget.orderId} has been delivered.');
+    widget.onStatusChanged();
+    if (mounted) Navigator.pop(context);
+  } catch (e) {
+    _showError('Failed to confirm: $e');
+  } finally {
+    if (mounted) {
+      setState(() => isConfirmingDelivery = false);
     }
   }
+}
 
   Future<void> _notifyCustomer(String title, String body) async {
     await FirebaseFirestore.instance.collection('users').doc(widget.userId).collection('inAppNotifications').add({
@@ -745,7 +1005,7 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
                       title: 'Customer • Order #${_shortOrderId(widget.orderId)}',
                       chatId: chatId,
                       isEmployee: true,
-                      orderId: widget.orderId, // optional: for future use
+                      orderId: widget.orderId,
                     ),
                   ),
                 );
@@ -759,10 +1019,10 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
   }
 
   String _generateChatId() {
-  final employeeId = FirebaseAuth.instance.currentUser!.uid;
-  final customerId = widget.orderData['userId'] as String;
-  return '${customerId}_${employeeId}_${widget.orderId}'; // CUSTOMER FIRST
-}
+    final employeeId = FirebaseAuth.instance.currentUser!.uid;
+    final customerId = widget.orderData['userId'] as String;
+    return '${customerId}_${employeeId}_${widget.orderId}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -808,21 +1068,11 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
                   children: [
                     GoogleMap(
                       initialCameraPosition: CameraPosition(target: _customerLocation, zoom: 15),
-                      markers: {
-                        Marker(
-                          markerId: const MarkerId('customer'),
-                          position: _customerLocation,
-                          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-                        ),
-                        if (_isIconLoaded && _cachedTruckIcon != null)
-                          Marker(
-                            markerId: const MarkerId('driver'),
-                            position: _driverLocation,
-                            icon: _cachedTruckIcon!,
-                            anchor: const Offset(0.5, 0.5),
-                          ),
-                      },
+                      markers: _markers,
                       polylines: _polylines,
+                      myLocationEnabled: false,
+                      myLocationButtonEnabled: false,
+                      zoomControlsEnabled: false,
                       onMapCreated: (c) {
                         _mapController = c;
                         Future.delayed(const Duration(milliseconds: 500), () {
@@ -831,9 +1081,6 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
                           }
                         });
                       },
-                      myLocationEnabled: true,
-                      myLocationButtonEnabled: false,
-                      zoomControlsEnabled: false,
                     ),
                     if (_isRouteLoading)
                       const Center(child: CircularProgressIndicator(color: Colors.white)),
@@ -878,10 +1125,24 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
               if (canConfirmDelivery)
                 Expanded(
                   child: ElevatedButton.icon(
-                    icon: const Icon(Icons.check_circle, size: 20),
-                    label: const Text('Confirm Delivery'),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), padding: const EdgeInsets.symmetric(vertical: 14)),
-                    onPressed: _confirmDelivery,
+                    icon: isConfirmingDelivery
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.check_circle, size: 20),
+                    label: Text(isConfirmingDelivery ? 'Confirming...' : 'Confirm Delivery'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    onPressed: isConfirmingDelivery ? null : _confirmDelivery,
                   ),
                 ),
             ],
@@ -911,7 +1172,7 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
 }
 
 // ================================================================
-// FULL-SCREEN MAP: WAZE-STYLE ROUTE
+// FULL-SCREEN MAP: WAZE-STYLE + BIG FAB
 // ================================================================
 class FullScreenMapScreen extends StatefulWidget {
   final String orderId;
@@ -932,9 +1193,11 @@ class FullScreenMapScreen extends StatefulWidget {
 class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   GoogleMapController? _mapController;
   LatLng _driverLocation;
+  LatLng? _previousLocation;
   bool _isIconLoaded = false;
   bool _isRouteLoading = false;
   Set<Polyline> _polylines = {};
+  Set<Marker> _markers = {};
   String _routeInfo = '';
   static BitmapDescriptor? _cachedTruckIcon;
 
@@ -944,6 +1207,7 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   void initState() {
     super.initState();
     _driverLocation = widget.driverLocation;
+    _previousLocation = widget.driverLocation;
     _loadDriverIconFromFirebase();
     _listenToDriverLocation();
 
@@ -995,12 +1259,43 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
       if (lat != null && lng != null) {
         final newLoc = LatLng(lat as double, lng as double);
         setState(() {
+          _previousLocation = _driverLocation;
           _driverLocation = newLoc;
+          _updateMarkers();
           _fetchRoute();
         });
         _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
       }
     });
+  }
+
+  void _updateMarkers() {
+    double rotation = 0;
+    if (_previousLocation != null) {
+      rotation = Geolocator.bearingBetween(
+        _previousLocation!.latitude,
+        _previousLocation!.longitude,
+        _driverLocation.latitude,
+        _driverLocation.longitude,
+      );
+    }
+
+    _markers = {
+      Marker(
+        markerId: const MarkerId('customer'),
+        position: widget.customerLocation,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      ),
+      if (_isIconLoaded && _cachedTruckIcon != null)
+        Marker(
+          markerId: const MarkerId('driver'),
+          position: _driverLocation,
+          icon: _cachedTruckIcon!,
+          anchor: const Offset(0.5, 0.5),
+          rotation: rotation,
+          zIndex: 10,
+        ),
+    };
   }
 
   Future<void> _fetchRoute() async {
@@ -1036,7 +1331,6 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
                 points: points,
                 color: Colors.blue,
                 width: 5,
-                patterns: [PatternItem.dash(30), PatternItem.gap(10)],
               ),
             };
           });
@@ -1098,6 +1392,76 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
     return points;
   }
 
+  void _launchNavigation() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hasSeenTip = prefs.getBool('nav_tip_shown') ?? false;
+
+    if (!hasSeenTip && mounted) {
+      await prefs.setBool('nav_tip_shown', true);
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Navigation Tip', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: const Text(
+            'We\'ll open Waze first (best for PH traffic).\n\n'
+            'If Waze is not installed, Google Maps will open automatically.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Got it!', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) return;
+    }
+
+    final originLat = _driverLocation.latitude;
+    final originLng = _driverLocation.longitude;
+    final destLat = widget.customerLocation.latitude;
+    final destLng = widget.customerLocation.longitude;
+
+    final wazeUri = Uri.parse('waze://?ll=$destLat,$destLng&navigate=yes');
+    final googleUri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1'
+      '&origin=$originLat,$originLng'
+      '&destination=$destLat,$destLng'
+      '&travelmode=driving'
+      '&dir_action=navigate',
+    );
+
+    bool opened = false;
+    try {
+      opened = await launchUrl(wazeUri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+
+    if (!opened) {
+      try {
+        await launchUrl(googleUri, mode: LaunchMode.externalApplication);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Waze not found. Opening Google Maps...'),
+              backgroundColor: Colors.blue,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Opening in browser...')),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1110,40 +1474,56 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
         children: [
           GoogleMap(
             initialCameraPosition: CameraPosition(target: widget.customerLocation, zoom: 14),
-            markers: {
-              Marker(
-                markerId: const MarkerId('customer'),
-                position: widget.customerLocation,
-                icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-              ),
-              if (_isIconLoaded && _cachedTruckIcon != null)
-                Marker(
-                  markerId: const MarkerId('driver'),
-                  position: _driverLocation,
-                  icon: _cachedTruckIcon!,
-                  anchor: const Offset(0.5, 0.5),
-                ),
-            },
+            markers: _markers,
             polylines: _polylines,
-            myLocationEnabled: true,
+            myLocationEnabled: false,
             myLocationButtonEnabled: true,
             zoomControlsEnabled: true,
             onMapCreated: (c) => _mapController = c,
           ),
           if (_isRouteLoading)
             const Center(child: CircularProgressIndicator(color: Colors.white)),
+
           if (_routeInfo.isNotEmpty)
             Positioned(
-              top: 16,
+              top: MediaQuery.of(context).padding.top + 10,
               left: 16,
+              right: 16,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(16)),
-                child: Text(_routeInfo, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10)],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.access_time, color: Colors.white, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      _routeInfo.split('•').first.trim(),
+                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      ' • ${_routeInfo.split('•').last.trim()}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 16),
+                    ),
+                  ],
+                ),
               ),
             ),
         ],
       ),
+
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _launchNavigation,
+        backgroundColor: Colors.green,
+        icon: const Icon(Icons.navigation, size: 28),
+        label: const Text('START NAVIGATION', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 }
+// --------------------------------//

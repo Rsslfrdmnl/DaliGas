@@ -21,22 +21,85 @@ class _ManageAddressScreenState extends State<ManageAddressScreen> {
   }
 
   Future<void> _loadAddresses() async {
-  final doc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
-  final data = doc.data();
-  if (data != null && data['addresses'] != null) {
-    List<Map<String, dynamic>> loaded = List<Map<String, dynamic>>.from(data['addresses']);
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user!.uid)
+        .get();
+    final data = doc.data();
+    if (data != null && data['addresses'] != null) {
+      List<Map<String, dynamic>> loaded =
+          List<Map<String, dynamic>>.from(data['addresses']);
 
-    // 🔥 Sort: active first
-    loaded.sort((a, b) {
-      final aActive = (a['isActive'] ?? false) ? 0 : 1;
-      final bActive = (b['isActive'] ?? false) ? 0 : 1;
-      return aActive.compareTo(bActive);
-    });
+      // Sort: active first
+      loaded.sort((a, b) {
+        final aActive = (a['isActive'] ?? false) ? 0 : 1;
+        final bActive = (b['isActive'] ?? false) ? 0 : 1;
+        return aActive.compareTo(bActive);
+      });
 
-    setState(() => addresses = loaded);
+      setState(() => addresses = loaded);
+    }
   }
-}
 
+  // Toggle active state (activate or deactivate)
+  Future<void> _toggleActive(int index) async {
+    final bool currentlyActive = addresses[index]['isActive'] ?? false;
+    final bool willBeActive = !currentlyActive;
+
+    // Update all addresses
+    for (int i = 0; i < addresses.length; i++) {
+      addresses[i]['isActive'] = willBeActive && (i == index);
+    }
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user!.uid)
+        .update({'addresses': addresses});
+
+    setState(() {});
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          willBeActive
+              ? 'Address activated'
+              : 'Address deactivated (no active address)',
+        ),
+      ),
+    );
+
+    // Notify parent screen (e.g., Home) to refresh
+    Navigator.pop(context, true);
+  }
+
+  // Edit existing address (replace at same index)
+  Future<void> _editAddress(int index, Map<String, dynamic> address) async {
+    final updatedAddress = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddAddressScreen(editMode: true, address: address),
+      ),
+    );
+
+    // Expect the full updated map back
+    if (updatedAddress != null && updatedAddress is Map<String, dynamic>) {
+      setState(() {
+        addresses[index] = updatedAddress;
+      });
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user!.uid)
+          .update({'addresses': addresses});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Address updated successfully')),
+      );
+
+      // Re-sort in case active status changed during edit
+      _loadAddresses();
+    }
+  }
 
   Future<void> _deleteAddress(int index) async {
     final confirm = await showDialog<bool>(
@@ -57,56 +120,31 @@ class _ManageAddressScreenState extends State<ManageAddressScreen> {
       ),
     );
 
-    if (confirm != null && confirm) {
-      addresses.removeAt(index);
-      await FirebaseFirestore.instance.collection('users').doc(user!.uid).update({
-        'addresses': addresses,
+    if (confirm == true) {
+      setState(() {
+        addresses.removeAt(index);
       });
-      setState(() {});
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user!.uid)
+          .update({'addresses': addresses});
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Address deleted')),
       );
     }
   }
 
-  Future<void> _editAddress(Map<String, dynamic> address) async {
-    final updated = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AddAddressScreen(editMode: true, address: address),
-      ),
-    );
-
-    if (updated != null && updated == true) {
-      await _loadAddresses();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Address updated successfully')),
-      );
-    }
-  }
-
   Future<void> _addAddress() async {
-    await Navigator.push(
+    final result = await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const AddAddressScreen()),
     );
-    _loadAddresses();
-  }
 
-  Future<void> _activateAddress(int index) async {
-    // Deactivate all, then activate tapped one
-    for (int i = 0; i < addresses.length; i++) {
-      addresses[i]['isActive'] = i == index;
+    if (result != null) {
+      _loadAddresses();
     }
-
-    await FirebaseFirestore.instance.collection('users').doc(user!.uid).update({
-      'addresses': addresses,
-    });
-
-    setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Activated address #${index + 1}')),
-    );
   }
 
   @override
@@ -138,7 +176,7 @@ class _ManageAddressScreenState extends State<ManageAddressScreen> {
                   final isActive = a['isActive'] == true;
 
                   return GestureDetector(
-                    onTap: () => _activateAddress(index),
+                    onTap: () => _toggleActive(index),
                     child: Card(
                       color: isActive ? const Color(0xFFE8F5E9) : Colors.white,
                       margin: const EdgeInsets.only(bottom: 10),
@@ -154,7 +192,9 @@ class _ManageAddressScreenState extends State<ManageAddressScreen> {
                         title: Text(
                           '${a['street'] ?? ''}, ${a['barangay'] ?? ''}, ${a['city'] ?? ''}',
                           style: const TextStyle(
-                              color: Colors.black, fontWeight: FontWeight.bold),
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         subtitle: Text(
                           '${a['province'] ?? ''}, ${a['postal'] ?? ''}',
@@ -167,7 +207,7 @@ class _ManageAddressScreenState extends State<ManageAddressScreen> {
                               const Icon(Icons.check_circle, color: Colors.green),
                             IconButton(
                               icon: const Icon(Icons.edit, color: Colors.blue),
-                              onPressed: () => _editAddress(a),
+                              onPressed: () => _editAddress(index, a),
                             ),
                             IconButton(
                               icon: const Icon(Icons.delete, color: Colors.redAccent),

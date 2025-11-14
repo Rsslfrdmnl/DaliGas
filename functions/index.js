@@ -1,27 +1,32 @@
-// index.js (FINAL — CHAT NOTIFICATIONS 100% WORKING)
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { getAuth } from "firebase-admin/auth";
-import {
-  onCall,
-  HttpsError,
-} from "firebase-functions/v2/https";
+import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { defineSecret, defineString } from "firebase-functions/params";
+import { https } from "firebase-functions/v2";
 import {
   onDocumentCreated,
   onDocumentUpdated,
 } from "firebase-functions/v2/firestore";
 import { logger } from "firebase-functions";
 import admin from "firebase-admin";
+import { onSchedule } from "firebase-functions/v2/scheduler";
+import axios from "axios";
+import * as cheerio from "cheerio";
+import * as pdfParse from "pdf-parse";
+import fetch from "node-fetch";
+import corsLib from "cors";
 
 const adminApp = initializeApp();
 const db = getFirestore(adminApp);
 const auth = getAuth(adminApp);
 const messaging = getMessaging(adminApp);
+const cors = corsLib({ origin: true });
 
-/**
- * Helper: safe send FCM and cleanup invalid tokens
- */
+/* -------------------------------------------------------
+   Helper: safe send FCM and cleanup invalid tokens
+---------------------------------------------------------- */
 async function safeSendFCM(message, userId) {
   try {
     const resp = await messaging.send(message);
@@ -295,7 +300,7 @@ export const notifyOrderUpdated = onDocumentUpdated("orders/{orderId}", async (e
 });
 
 /* -------------------------------------------------------
-   New Chat Message → Push Notification + In-App (NOW WORKS!)
+   New Chat Message → Push Notification + In-App (FINAL VERSION)
 ---------------------------------------------------------- */
 export const notifyOnNewMessage = onDocumentCreated(
   "chats/{chatId}/messages/{messageId}",
@@ -309,54 +314,97 @@ export const notifyOnNewMessage = onDocumentCreated(
     const senderRole = messageData.senderRole;
     const seen = messageData.seen === true;
 
-    if (!text || !senderId || !senderRole || seen) return;
+    logger.info("=== NEW MESSAGE DETECTED ===", {
+      chatId,
+      messageId,
+      text,
+      senderId,
+      senderRole,
+      seen,
+    });
 
-    const metaDoc = await db
-      .collection("chats")
-      .doc(chatId)
-      .collection("metadata")
-      .doc("info")
-      .get();
-
-    if (!metaDoc.exists) {
-      logger.warn("No metadata for chat:", chatId);
+    if (!text || !senderId || !senderRole || seen) {
+      logger.warn("Invalid or seen message - skipping");
       return;
     }
 
-    const meta = metaDoc.data();
-    const userId = meta.userId;
-    const employeeId = meta.employeeId;
-    const orderId = meta.orderId || null;
+    // === READ CHAT DOCUMENT DIRECTLY (no metadata/info) ===
+    const chatDoc = await db.collection("chats").doc(chatId).get();
+    if (!chatDoc.exists) {
+      logger.error("Chat document not found:", chatId);
+      return;
+    }
 
-    if (!userId || !employeeId) return;
+    const chatData = chatDoc.data();
+    logger.info("Chat document data:", chatData);
+
+    const customerId = chatData.customerId;
+    const employeeId = chatData.employeeId;
+    const orderId = chatData.orderId || null;
+
+    if (!customerId || !employeeId) {
+      logger.error("Missing customerId or employeeId in chat doc", { chatData });
+      return;
+    }
 
     const isFromCustomer = senderRole === "customer";
-    const recipientId = isFromCustomer ? employeeId : userId;
+    const recipientId = isFromCustomer ? employeeId : customerId;
     const recipientCollection = isFromCustomer ? "employees" : "users";
 
-    const recipientDoc = await db.collection(recipientCollection).doc(recipientId).get();
-    if (!recipientDoc.exists) return;
+    logger.info("Recipient resolved", { recipientId, recipientCollection, isFromCustomer });
 
-    const recipientData = recipientDoc.data();
-    const fcmToken = recipientData.fcmToken;
-    const recipientName = recipientData.fullName || recipientData.name || "User";
+    // === GET SENDER NAME (for title) ===
+    let senderName = "User";
+
+    if (senderRole === "customer") {
+      const customerSnap = await db.collection("users").doc(senderId).get();
+      if (customerSnap.exists) {
+        senderName = customerSnap.data()?.fullName || "Customer";
+      } else {
+        senderName = "Customer";
+      }
+    } else if (senderRole === "employee") {
+      const empSnap = await db.collection("employees").doc(senderId).get();
+      if (empSnap.exists) {
+        senderName = empSnap.data()?.name || "Driver";
+      } else {
+        senderName = "Driver";
+      }
+    }
 
     const shortMsg = text.length > 60 ? text.substring(0, 57) + "..." : text;
-    const title = isFromCustomer ? "New Message from Customer" : `New Message from ${recipientName}`;
+    const title = `New Message from ${senderName}`;
     const body = `"${shortMsg}"`;
     const fcmMessageId = `msg_${chatId}_${messageId}`;
 
-    await db.collection(recipientCollection).doc(recipientId).collection("inAppNotifications").add({
-      title,
-      body,
-      type: "message",
-      chatId,
-      orderId,
-      messageId: fcmMessageId,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      read: false,
-    });
+    // === SAVE IN-APP NOTIFICATION ===
+    await db
+      .collection(recipientCollection)
+      .doc(recipientId)
+      .collection("inAppNotifications")
+      .add({
+        title,
+        body,
+        type: "message",
+        chatId,
+        orderId,
+        messageId: fcmMessageId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        read: false,
+      });
 
+    logger.info("In-app notification saved for", recipientId);
+
+    // === FETCH RECIPIENT FCM TOKEN ===
+    const recipientDoc = await db.collection(recipientCollection).doc(recipientId).get();
+    if (!recipientDoc.exists) {
+      logger.error("Recipient document not found", { recipientId });
+      return;
+    }
+
+    const fcmToken = recipientDoc.data()?.fcmToken;
+
+    // === SEND PUSH NOTIFICATION ===
     if (fcmToken) {
       const message = {
         token: fcmToken,
@@ -365,6 +413,7 @@ export const notifyOnNewMessage = onDocumentCreated(
           type: "message",
           chatId: String(chatId),
           orderId: orderId || "",
+          title: title, // ← for Flutter click handler
           messageId: fcmMessageId,
           click_action: "FLUTTER_NOTIFICATION_CLICK",
         },
@@ -373,33 +422,23 @@ export const notifyOnNewMessage = onDocumentCreated(
           notification: {
             channelId: "daligas_channel",
             sound: "default",
-            clickAction: "FLUTTER_NOTIFICATION_CLICK",
-          },
-        },
-        apns: {
-          payload: {
-            aps: {
-              sound: "default",
-              category: "MESSAGE_CATEGORY",
-            },
           },
         },
       };
-      await safeSendFCM(message, recipientId);
+
+      const result = await safeSendFCM(message, recipientId);
+      logger.info("FCM send result:", result);
+    } else {
+      logger.warn("No FCM token for recipient", { recipientId, recipientCollection });
     }
 
-    logger.log(`Chat notification sent to ${recipientCollection.slice(0, -1)} ${recipientId}`);
+    logger.info("=== CHAT NOTIFICATION SUCCESS ===");
   }
 );
 
 /* -------------------------------------------------------
    LPG Price Sync
 ---------------------------------------------------------- */
-import axios from "axios";
-import * as cheerio from "cheerio";
-import * as pdfParse from "pdf-parse";
-import { onSchedule } from "firebase-functions/v2/scheduler";
-
 export const checkDOEArticles = onSchedule(
   { schedule: "0 8 * * 0", timeZone: "Asia/Manila" },
   async () => {
@@ -449,3 +488,74 @@ export const checkDOEArticles = onSchedule(
     }
   }
 );
+
+/* -------------------------------------------------------
+   PLACES AUTOCOMPLETE PROXY
+---------------------------------------------------------- */
+export const placesAutocomplete = https.onRequest((req, res) => {
+  cors(req, res, async () => {
+    const { input } = req.query;
+    if (!input || input.toString().trim() === "") {
+      return res.status(400).json({ error: "Missing or empty `input`" });
+    }
+
+    const API_KEY = defineString("GOOGLE_PLACES_KEY").value();
+    if (!API_KEY) {
+      logger.error("Google Places API key missing. Run: firebase functions:config:set google.places_key=\"YOUR_KEY\"");
+      return res.status(500).json({ error: "Server misconfigured" });
+    }
+
+    try {
+      const googleUrl = "https://maps.googleapis.com/maps/api/place/autocomplete/json";
+      const params = new URLSearchParams({
+        input: input.toString(),
+        key: API_KEY,
+        language: "en",
+        components: "country:ph",
+      });
+
+      const googleResp = await fetch(`${googleUrl}?${params}`);
+      const data = await googleResp.json();
+
+      res.status(googleResp.status).json(data);
+    } catch (err) {
+      logger.error("placesAutocomplete error:", err);
+      res.status(500).json({ error: "Failed to contact Google" });
+    }
+  });
+});
+
+/* -------------------------------------------------------
+   PLACE DETAILS PROXY
+---------------------------------------------------------- */
+export const placeDetails = https.onRequest((req, res) => {
+  cors(req, res, async () => {
+    const { placeid } = req.query;
+    if (!placeid || placeid.toString().trim() === "") {
+      return res.status(400).json({ error: "Missing or empty `placeid`" });
+    }
+
+    const API_KEY = defineString("GOOGLE_PLACES_KEY").value();
+    if (!API_KEY) {
+      logger.error("Google Places API key missing");
+      return res.status(500).json({ error: "Server misconfigured" });
+    }
+
+    try {
+      const googleUrl = "https://maps.googleapis.com/maps/api/place/details/json";
+      const params = new URLSearchParams({
+        place_id: placeid.toString(),
+        key: API_KEY,
+        language: "en",
+      });
+
+      const googleResp = await fetch(`${googleUrl}?${params}`);
+      const data = await googleResp.json();
+
+      res.status(googleResp.status).json(data);
+    } catch (err) {
+      logger.error("placeDetails error:", err);
+      res.status(500).json({ error: "Failed to contact Google" });
+    }
+  });
+});

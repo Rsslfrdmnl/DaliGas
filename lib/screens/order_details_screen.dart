@@ -4,30 +4,31 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart'; // ← ADD
-import 'package:geocoding/geocoding.dart'; // ← ADD
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:daligas/screens/review_order_screen.dart';
 import 'package:daligas/screens/cart_screen.dart' as cart;
 import 'package:daligas/screens/chat_screen.dart';
-import 'package:collection/collection.dart';
 
-// REPLACE WITH YOUR GOOGLE MAPS API KEY
 const String GOOGLE_MAPS_API_KEY = 'AIzaSyAVDDHYb29rt4io-HI0Uq6vfv_GAnlDLlw';
 
 // ===================================================================
-// FULL-SCREEN MAP (Customer View) - LIVE TRACKING
+// FULL-SCREEN MAP (Customer View) - ROTATING TRUCK + DASHED ROUTE
 // ===================================================================
 class FullScreenMapScreen extends StatefulWidget {
   final String orderId;
   final LatLng customerLocation;
+  final LatLng driverLocation;
 
   const FullScreenMapScreen({
     super.key,
     required this.orderId,
     required this.customerLocation,
+    required this.driverLocation,
   });
 
   @override
@@ -37,49 +38,56 @@ class FullScreenMapScreen extends StatefulWidget {
 class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   GoogleMapController? _mapController;
   LatLng _driverLocation = const LatLng(14.5995, 120.9842);
+  LatLng? _previousLocation;
   bool _isIconLoaded = false;
   bool _isRouteLoading = false;
   Set<Polyline> _polylines = {};
+  Set<Marker> _markers = {};
   String _routeInfo = '';
   static BitmapDescriptor? _cachedTruckIcon;
 
   @override
-  void initState() {
-    super.initState();
-    _loadDriverIconFromFirebase();
-    _listenToDriverLocation();
+void initState() {
+  super.initState();
 
-    // Wait for map to be ready
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _driverLocation.latitude != 14.5995) {
-        _fetchRoute();
-      }
-    });
-  }
+  // ← FIX: Use passed driver location
+  _driverLocation = widget.driverLocation;
+  _previousLocation = _driverLocation;
+
+  _loadDriverIconFromFirebase();
+  _listenToDriverLocation();
+
+  // Force initial marker + route
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _updateMarkers(); // ← ADD THIS
+    if (_driverLocation.latitude != 14.5995 && widget.customerLocation.latitude != 14.5995) {
+      _fetchRoute();
+    }
+  });
+}
 
   Future<void> _loadDriverIconFromFirebase() async {
     if (_cachedTruckIcon != null) {
-      if (mounted) setState(() => _isIconLoaded = true);
+      setState(() => _isIconLoaded = true);
       return;
     }
-
     try {
       final ref = FirebaseStorage.instance.ref().child('icons/truck.png');
       final url = await ref.getDownloadURL();
       final response = await http.get(Uri.parse(url));
-      if (response.statusCode != 200) return;
-
-      final codec = await ui.instantiateImageCodec(
-        response.bodyBytes,
-        targetWidth: 150,
-        targetHeight: 150,
-      );
-      final frame = await codec.getNextFrame();
-      final byteData = await frame.image.toByteData(format: ui.ImageByteFormat.png);
-      final bitmap = BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
-      _cachedTruckIcon = bitmap;
-
-      if (mounted) setState(() => _isIconLoaded = true);
+      if (response.statusCode == 200) {
+        final codec = await ui.instantiateImageCodec(
+          response.bodyBytes,
+          targetWidth: 150,
+          targetHeight: 150,
+        );
+        final frame = await codec.getNextFrame();
+        final byteData = await frame.image.toByteData(format: ui.ImageByteFormat.png);
+        final bitmap = BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+        _cachedTruckIcon = bitmap;
+        if (mounted) setState(() => _isIconLoaded = true);
+        _updateMarkers(); // ← ADD THIS
+      }
     } catch (e) {
       debugPrint('Truck icon load failed: $e');
     }
@@ -95,19 +103,52 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
       final data = doc.data()!;
       final lat = data['driverLocation']?['lat'];
       final lng = data['driverLocation']?['lng'];
-      if (lat != null && lng != null) {
-        final newLoc = LatLng(lat as double, lng as double);
-        setState(() => _driverLocation = newLoc);
-        _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
-        if (mounted) _fetchRoute();
-      }
+      if (lat == null || lng == null) return;
+
+      final newLoc = LatLng(lat as double, lng as double);
+      setState(() {
+        _previousLocation = _driverLocation;
+        _driverLocation = newLoc;
+        _updateMarkers();
+      });
+
+      _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
+      if (widget.customerLocation.latitude != 14.5995) _fetchRoute();
     });
+  }
+
+  void _updateMarkers() {
+    double rotation = 0;
+    if (_previousLocation != null) {
+      rotation = Geolocator.bearingBetween(
+        _previousLocation!.latitude,
+        _previousLocation!.longitude,
+        _driverLocation.latitude,
+        _driverLocation.longitude,
+      );
+    }
+
+    _markers = {
+      Marker(
+        markerId: const MarkerId('customer'),
+        position: widget.customerLocation,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      ),
+      if (_isIconLoaded && _cachedTruckIcon != null)
+        Marker(
+          markerId: const MarkerId('driver'),
+          position: _driverLocation,
+          icon: _cachedTruckIcon!,
+          anchor: const Offset(0.5, 0.5),
+          rotation: rotation,
+          zIndex: 10,
+        ),
+    };
   }
 
   Future<void> _fetchRoute() async {
     if (_driverLocation.latitude == 14.5995 || widget.customerLocation.latitude == 14.5995 || _isRouteLoading) return;
-
-    if (mounted) setState(() => _isRouteLoading = true);
+    setState(() => _isRouteLoading = true);
 
     final origin = '${_driverLocation.latitude},${_driverLocation.longitude}';
     final destination = '${widget.customerLocation.latitude},${widget.customerLocation.longitude}';
@@ -129,53 +170,46 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
           final legs = data['routes'][0]['legs'][0];
           final distance = legs['distance']['text'];
           final duration = legs['duration']['text'];
-          if (mounted) setState(() => _routeInfo = '$duration • $distance');
+          setState(() => _routeInfo = '$duration • $distance');
 
-          if (mounted) {
-            setState(() {
-              _polylines = {
-                Polyline(
-                  polylineId: const PolylineId('route'),
-                  points: points,
-                  color: Colors.blue,
-                  width: 5,
-                  patterns: [PatternItem.dash(30), PatternItem.gap(10)],
-                ),
-              };
-            });
-          }
+          setState(() {
+            _polylines = {
+              Polyline(
+                polylineId: const PolylineId('route'),
+                points: points,
+                color: Colors.blue,
+                width: 5,
+              ),
+            };
+          });
           _fitRouteOnMap(points);
         }
       }
     } catch (e) {
       debugPrint('Route fetch failed: $e');
     } finally {
-      if (mounted) setState(() => _isRouteLoading = false);
+      setState(() => _isRouteLoading = false);
     }
   }
 
   void _fitRouteOnMap(List<LatLng> points) {
-    if (points.isEmpty || _mapController == null || !mounted) return;
-
+    if (points.isEmpty || _mapController == null) return;
     double minLat = points[0].latitude, maxLat = points[0].latitude;
     double minLng = points[0].longitude, maxLng = points[0].longitude;
-
     for (var p in points) {
-      if (p.latitude < minLat) minLat = p.latitude;
-      if (p.latitude > maxLat) maxLat = p.latitude;
-      if (p.longitude < minLng) minLng = p.longitude;
-      if (p.longitude > maxLng) maxLng = p.longitude;
+      minLat = p.latitude < minLat ? p.latitude : minLat;
+      maxLat = p.latitude > maxLat ? p.latitude : maxLat;
+      minLng = p.longitude < minLng ? p.longitude : minLng;
+      maxLng = p.longitude > maxLng ? p.longitude : maxLng;
     }
-
     final bounds = LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng));
-    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100)); // ← Padding
+    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
   }
 
   List<LatLng> _decodePoly(String encoded) {
     List<LatLng> points = [];
     int index = 0, len = encoded.length;
     int lat = 0, lng = 0;
-
     while (index < len) {
       int b, shift = 0, result = 0;
       do {
@@ -185,9 +219,7 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
       } while (b >= 0x20);
       int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
       lat += dlat;
-
-      shift = 0;
-      result = 0;
+      shift = 0; result = 0;
       do {
         b = encoded.codeUnitAt(index++) - 63;
         result |= (b & 0x1f) << shift;
@@ -195,7 +227,6 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
       } while (b >= 0x20);
       int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
       lng += dlng;
-
       points.add(LatLng(lat / 1E5, lng / 1E5));
     }
     return points;
@@ -205,7 +236,7 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Live Tracking - #${_shortOrderId(widget.orderId)}'),
+        title: Text('Live Tracking - #${widget.orderId.substring(widget.orderId.length - 12)}'),
         backgroundColor: const Color(0xFF052238),
         foregroundColor: Colors.white,
       ),
@@ -213,30 +244,14 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
         children: [
           GoogleMap(
             initialCameraPosition: CameraPosition(target: widget.customerLocation, zoom: 14),
-            markers: {
-              Marker(
-                markerId: const MarkerId('customer'),
-                position: widget.customerLocation,
-                infoWindow: const InfoWindow(title: 'Delivery Address'),
-                icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-              ),
-              if (_isIconLoaded && _cachedTruckIcon != null)
-                Marker(
-                  markerId: const MarkerId('driver'),
-                  position: _driverLocation,
-                  infoWindow: const InfoWindow(title: 'Driver'),
-                  icon: _cachedTruckIcon!,
-                  anchor: const Offset(0.5, 0.5),
-                ),
-            },
+            markers: _markers,
             polylines: _polylines,
-            myLocationEnabled: true,
+            myLocationEnabled: false,
             myLocationButtonEnabled: true,
             zoomControlsEnabled: true,
             onMapCreated: (c) => _mapController = c,
           ),
-          if (_isRouteLoading)
-            const Center(child: CircularProgressIndicator(color: Colors.white)),
+          if (_isRouteLoading) const Center(child: CircularProgressIndicator(color: Colors.white)),
           if (_routeInfo.isNotEmpty)
             Positioned(
               top: 16,
@@ -251,14 +266,10 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
       ),
     );
   }
-
-  String _shortOrderId(String fullId) {
-    return fullId.length > 12 ? fullId.substring(fullId.length - 12) : fullId;
-  }
 }
 
 // ===================================================================
-// ORDER DETAILS SCREEN - CUSTOMER VIEW
+// ORDER DETAILS SCREEN - FULLY UPGRADED WITH EMPLOYEE-STYLE TRACKING
 // ===================================================================
 class OrderDetailsScreen extends StatefulWidget {
   final String orderId;
@@ -279,22 +290,22 @@ class OrderDetailsScreen extends StatefulWidget {
 class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   GoogleMapController? _mapController;
   LatLng _driverLocation = const LatLng(14.5995, 120.9842);
+  LatLng? _previousLocation;
   LatLng _customerLocation = const LatLng(14.5995, 120.9842);
-  bool _isTracking = false;
   bool _isGeocoding = false;
   bool _isIconLoaded = false;
   bool _isRouteLoading = false;
   Set<Polyline> _polylines = {};
+  Set<Marker> _markers = {};
   String _routeInfo = '';
+
+  static BitmapDescriptor? _cachedTruckIcon;
 
   String? _driverPhone;
   String? _driverName;
   bool _isLoadingPhone = false;
-
   String _currentStatus = 'Processing';
   bool _hasReviewed = false;
-
-  static BitmapDescriptor? _cachedTruckIcon;
 
   @override
   void initState() {
@@ -317,10 +328,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   Future<void> _loadDriverIconFromFirebase() async {
     if (_cachedTruckIcon != null) {
-      if (mounted) setState(() => _isIconLoaded = true);
+      setState(() => _isIconLoaded = true);
       return;
     }
-
     try {
       final ref = FirebaseStorage.instance.ref().child('icons/truck.png');
       final url = await ref.getDownloadURL();
@@ -344,16 +354,47 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       final data = doc.data()!;
       final lat = data['driverLocation']?['lat'];
       final lng = data['driverLocation']?['lng'];
-      if (lat != null && lng != null) {
-        final newLoc = LatLng(lat as double, lng as double);
-        setState(() {
-          _driverLocation = newLoc;
-          _isTracking = true;
-        });
-        _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
-        if (mounted && _customerLocation.latitude != 14.5995) _fetchRoute();
-      }
+      if (lat == null || lng == null) return;
+
+      final newLoc = LatLng(lat as double, lng as double);
+      setState(() {
+        _previousLocation = _driverLocation;
+        _driverLocation = newLoc;
+        _updateMarkers();
+      });
+
+      _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
+      if (_customerLocation.latitude != 14.5995) _fetchRoute();
     });
+  }
+
+  void _updateMarkers() {
+    double rotation = 0;
+    if (_previousLocation != null) {
+      rotation = Geolocator.bearingBetween(
+        _previousLocation!.latitude,
+        _previousLocation!.longitude,
+        _driverLocation.latitude,
+        _driverLocation.longitude,
+      );
+    }
+
+    _markers = {
+      Marker(
+        markerId: const MarkerId('customer'),
+        position: _customerLocation,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      ),
+      if (_isIconLoaded && _cachedTruckIcon != null)
+        Marker(
+          markerId: const MarkerId('driver'),
+          position: _driverLocation,
+          icon: _cachedTruckIcon!,
+          anchor: const Offset(0.5, 0.5),
+          rotation: rotation,
+          zIndex: 10,
+        ),
+    };
   }
 
   void _listenToOrderStatus() {
@@ -432,7 +473,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   points: points,
                   color: Colors.blue,
                   width: 5,
-                  patterns: [PatternItem.dash(30), PatternItem.gap(10)],
                 ),
               };
             });
@@ -449,17 +489,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   void _fitRouteOnMap(List<LatLng> points) {
     if (points.isEmpty || _mapController == null || !mounted) return;
-
     double minLat = points[0].latitude, maxLat = points[0].latitude;
     double minLng = points[0].longitude, maxLng = points[0].longitude;
-
     for (var p in points) {
-      if (p.latitude < minLat) minLat = p.latitude;
-      if (p.latitude > maxLat) maxLat = p.latitude;
-      if (p.longitude < minLng) minLng = p.longitude;
-      if (p.longitude > maxLng) maxLng = p.longitude;
+      minLat = p.latitude < minLat ? p.latitude : minLat;
+      maxLat = p.latitude > maxLat ? p.latitude : maxLat;
+      minLng = p.longitude < minLng ? p.longitude : minLng;
+      maxLng = p.longitude > maxLng ? p.longitude : maxLng;
     }
-
     final bounds = LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng));
     _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
   }
@@ -468,7 +505,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     List<LatLng> points = [];
     int index = 0, len = encoded.length;
     int lat = 0, lng = 0;
-
     while (index < len) {
       int b, shift = 0, result = 0;
       do {
@@ -478,9 +514,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       } while (b >= 0x20);
       int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
       lat += dlat;
-
-      shift = 0;
-      result = 0;
+      shift = 0; result = 0;
       do {
         b = encoded.codeUnitAt(index++) - 63;
         result |= (b & 0x1f) << shift;
@@ -488,7 +522,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       } while (b >= 0x20);
       int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
       lng += dlng;
-
       points.add(LatLng(lat / 1E5, lng / 1E5));
     }
     return points;
@@ -547,14 +580,17 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   Future<void> _cancelOrder() async {
-    final confirm = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
-      title: const Text('Cancel Order'),
-      content: const Text('Are you sure you want to cancel this order?'),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('No')),
-        TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Yes', style: TextStyle(color: Colors.red))),
-      ],
-    ));
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Cancel Order'),
+        content: const Text('Are you sure you want to cancel this order?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('No')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Yes', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
 
     if (confirm != true || !mounted) return;
 
@@ -633,15 +669,23 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   void _showFullMap() {
-    if (_customerLocation.latitude == 14.5995) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Customer address still loading…')));
-      return;
-    }
-
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => FullScreenMapScreen(orderId: widget.orderId, customerLocation: _customerLocation),
-    ));
+  if (_customerLocation.latitude == 14.5995) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Customer address still loading…')),
+    );
+    return;
   }
+
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => FullScreenMapScreen(
+        orderId: widget.orderId,
+        customerLocation: _customerLocation,
+        driverLocation: _driverLocation, // ← ADD THIS
+      ),
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -729,12 +773,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     children: [
                       GoogleMap(
                         initialCameraPosition: CameraPosition(target: _customerLocation, zoom: 15),
-                        markers: {
-                          Marker(markerId: const MarkerId('customer'), position: _customerLocation, infoWindow: const InfoWindow(title: 'Delivery Address'), icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)),
-                          if (_isTracking && _isIconLoaded && _cachedTruckIcon != null)
-                            Marker(markerId: const MarkerId('driver'), position: _driverLocation, infoWindow: const InfoWindow(title: 'Driver'), icon: _cachedTruckIcon!, anchor: const Offset(0.5, 0.5)),
-                        },
+                        markers: _markers,
                         polylines: _polylines,
+                        myLocationEnabled: false,
+                        myLocationButtonEnabled: false,
+                        zoomControlsEnabled: false,
                         onMapCreated: (c) {
                           _mapController = c;
                           Future.delayed(const Duration(milliseconds: 500), () {
@@ -743,19 +786,31 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                             }
                           });
                         },
-                        myLocationEnabled: true,
-                        myLocationButtonEnabled: false,
-                        zoomControlsEnabled: false,
                       ),
                       if (_isRouteLoading) const Center(child: CircularProgressIndicator(color: Colors.white)),
                       if (_routeInfo.isNotEmpty)
-                        Positioned(top: 8, left: 8, child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)), child: Text(_routeInfo, style: const TextStyle(color: Colors.white, fontSize: 11)))),
+                        Positioned(
+                          top: 8,
+                          left: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                            child: Text(_routeInfo, style: const TextStyle(color: Colors.white, fontSize: 11)),
+                          ),
+                        ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 8),
-              Center(child: TextButton.icon(onPressed: _showFullMap, icon: const Icon(Icons.fullscreen, size: 16, color: Colors.blue), label: const Text('Tap to expand', style: TextStyle(color: Colors.blue, fontSize: 12)), style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap))),
+              Center(
+                child: TextButton.icon(
+                  onPressed: _showFullMap,
+                  icon: const Icon(Icons.fullscreen, size: 16, color: Colors.blue),
+                  label: const Text('Tap to expand', style: TextStyle(color: Colors.blue, fontSize: 12)),
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                ),
+              ),
               const SizedBox(height: 16),
             ],
             const SizedBox(height: 100),
@@ -786,10 +841,16 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   Widget _infoRow(String label, String value) {
-    return Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(width: 100, child: Text('$label:', style: const TextStyle(color: Colors.white70))),
-      Expanded(child: Text(value, style: const TextStyle(color: Colors.white))),
-    ]));
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 100, child: Text('$label:', style: const TextStyle(color: Colors.white70))),
+          Expanded(child: Text(value, style: const TextStyle(color: Colors.white))),
+        ],
+      ),
+    );
   }
 
   Widget _timelineStep(String title, bool completed, {bool isLast = false}) {
@@ -804,20 +865,20 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   String _getStatusText(String status) => switch (status) {
-    'Processing' => 'Processing',
-    'Shipped' => 'Out for delivery',
-    'Delivered' => 'Delivered',
-    'Cancelled' => 'Cancelled',
-    _ => status,
-  };
+        'Processing' => 'Processing',
+        'Shipped' => 'Out for delivery',
+        'Delivered' => 'Delivered',
+        'Cancelled' => 'Cancelled',
+        _ => status,
+      };
 
   Color _getStatusColor(String status) => switch (status) {
-    'Processing' => Colors.orange,
-    'Shipped' => Colors.blue,
-    'Delivered' => Colors.green,
-    'Cancelled' => Colors.red,
-    _ => Colors.grey,
-  };
+        'Processing' => Colors.orange,
+        'Shipped' => Colors.blue,
+        'Delivered' => Colors.green,
+        'Cancelled' => Colors.red,
+        _ => Colors.grey,
+      };
 
   String _formatDate(DateTime date) {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
