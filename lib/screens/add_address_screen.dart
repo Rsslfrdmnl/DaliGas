@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:daligas/main_mobile.dart';
 import 'map_picker_screen.dart';
 
 class AddAddressScreen extends StatefulWidget {
@@ -186,7 +187,7 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
     setState(() => _isSaving = true);
 
     try {
-      final userRef = FirebaseFirestore.instance.collection('users').doc(_uid);
+      final userRef = firestore.collection('users').doc(_uid);
       final snapshot = await userRef.get();
       List<dynamic> currentAddresses = List.from(snapshot.data()?['addresses'] ?? []);
 

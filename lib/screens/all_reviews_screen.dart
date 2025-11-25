@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:daligas/main_mobile.dart';
 
 class AllReviewsScreen extends StatefulWidget {
   final String productId;
@@ -17,7 +18,7 @@ class _AllReviewsScreenState extends State<AllReviewsScreen> {
   Future<void> _toggleReaction(String reviewId, bool isLike) async {
   if (_user == null) return;
 
-  final reactionRef = FirebaseFirestore.instance
+  final reactionRef = firestore
       .collection('products')
       .doc(widget.productId)
       .collection('reviews')
@@ -25,13 +26,13 @@ class _AllReviewsScreenState extends State<AllReviewsScreen> {
       .collection('reactions')
       .doc(_user!.uid);
 
-  final reviewRef = FirebaseFirestore.instance
+  final reviewRef = firestore
       .collection('products')
       .doc(widget.productId)
       .collection('reviews')
       .doc(reviewId);
 
-  await FirebaseFirestore.instance.runTransaction((tx) async {
+  await firestore.runTransaction((tx) async {
     final snap = await reactionRef.get();
     final current = snap.data()?['type'] as String?;
 
@@ -74,7 +75,7 @@ class _AllReviewsScreenState extends State<AllReviewsScreen> {
   Future<void> _reportReview(String reviewId) async {
     if (_user == null) return;
 
-    await FirebaseFirestore.instance.collection('reports').add({
+    await firestore.collection('reports').add({
       'type': 'review',
       'productId': widget.productId,
       'reviewId': reviewId,
@@ -98,7 +99,7 @@ class _AllReviewsScreenState extends State<AllReviewsScreen> {
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
+        stream: firestore
             .collection('products')
             .doc(widget.productId)
             .collection('reviews')
@@ -135,7 +136,7 @@ class _AllReviewsScreenState extends State<AllReviewsScreen> {
               final dislikeCount = (review['dislikeCount'] ?? 0) as int;
 
               return FutureBuilder<DocumentSnapshot>(
-                future: FirebaseFirestore.instance
+                future: firestore
                     .collection('users')
                     .doc(review['userId'])
                     .get(),
@@ -203,7 +204,7 @@ class _AllReviewsScreenState extends State<AllReviewsScreen> {
                                 children: [
                                   // LIKE
                                   StreamBuilder<DocumentSnapshot>(
-                                    stream: FirebaseFirestore.instance
+                                    stream: firestore
                                         .collection('products')
                                         .doc(widget.productId)
                                         .collection('reviews')
@@ -238,7 +239,7 @@ class _AllReviewsScreenState extends State<AllReviewsScreen> {
 
                                   // DISLIKE
                                   StreamBuilder<DocumentSnapshot>(
-                                    stream: FirebaseFirestore.instance
+                                    stream: firestore
                                         .collection('products')
                                         .doc(widget.productId)
                                         .collection('reviews')

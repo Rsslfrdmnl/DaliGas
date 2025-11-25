@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:daligas/screens/account_screen.dart';
@@ -11,6 +13,7 @@ import 'package:daligas/screens/home_screen.dart';
 import 'package:daligas/screens/messages_screen.dart';
 import 'package:daligas/screens/review_order_screen.dart';
 import 'package:daligas/screens/order_details_screen.dart';
+import 'package:daligas/main_mobile.dart';
 
 class PurchasesScreen extends StatefulWidget {
   final int currentIndex;
@@ -31,6 +34,9 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
     'Delivered': 0,
     'Review': 0,
   });
+
+  // ADD: Track the Firestore subscription
+  StreamSubscription<QuerySnapshot>? _ordersSubscription;
 
   DateTime? _lastBackPress;
   static const int _backPressTimeout = 2;
@@ -61,12 +67,18 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
     }
   }
 
+  // FIXED: Safe listener with cancel + closed check
   void _listenToOrders() {
-    FirebaseFirestore.instance
+    // Cancel any previous subscription first
+    _ordersSubscription?.cancel();
+
+    _ordersSubscription = firestore
         .collection('orders')
         .where('userId', isEqualTo: user!.uid)
         .snapshots()
         .listen((snapshot) {
+      if (!mounted) return;
+
       final docs = snapshot.docs;
       final counts = {
         'All': docs.length,
@@ -87,13 +99,19 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
         }
       }
 
-      _tabCounts.add(counts);
+      // Only add if subject is not closed
+      if (!_tabCounts.isClosed) {
+        _tabCounts.add(counts);
+      }
+    }, onError: (error) {
+      debugPrint('Orders stream error: $error');
     });
   }
 
   @override
   void dispose() {
-    _tabCounts.close();
+    _ordersSubscription?.cancel();  // Cancel Firestore listener
+    _tabCounts.close();              // Close BehaviorSubject
     super.dispose();
   }
 
@@ -127,29 +145,29 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
               const SizedBox(width: 8),
             ],
             bottom: PreferredSize(
-  preferredSize: const Size.fromHeight(48),
-  child: StreamBuilder<Map<String, int>>(
-    stream: _tabCounts.stream,
-    builder: (context, snapshot) {
-      final counts = snapshot.data ?? {};
-      return TabBar(
-        isScrollable: false,
-        indicatorColor: Colors.white,
-        labelColor: Colors.white,
-        unselectedLabelColor: Colors.white70,
-        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 13),
-        tabs: [
-          _buildTab('All', counts['All']),
-          _buildTab('Processing', counts['Processing']),
-          _buildTab('Shipped', counts['Shipped']),
-          _buildTab('Delivered', counts['Delivered']),
-          _buildTab('Review', counts['Review']),
-        ],
-      );
-    },
-  ),
-),
+              preferredSize: const Size.fromHeight(48),
+              child: StreamBuilder<Map<String, int>>(
+                stream: _tabCounts.stream,
+                builder: (context, snapshot) {
+                  final counts = snapshot.data ?? {};
+                  return TabBar(
+                    isScrollable: false,
+                    indicatorColor: Colors.white,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: Colors.white70,
+                    labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 13),
+                    tabs: [
+                      _buildTab('All', counts['All']),
+                      _buildTab('Processing', counts['Processing']),
+                      _buildTab('Shipped', counts['Shipped']),
+                      _buildTab('Delivered', counts['Delivered']),
+                      _buildTab('Review', counts['Review']),
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
           body: RefreshIndicator(
             onRefresh: () async {
@@ -251,7 +269,7 @@ class PurchasesTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
+      stream: firestore
           .collection('orders')
           .where('userId', isEqualTo: userId)
           .orderBy('createdAt', descending: true)
@@ -432,83 +450,290 @@ class PurchasesTab extends StatelessWidget {
     _ => Colors.grey,
   };
 
-  Widget _buildActionButton(BuildContext context, String status, DocumentSnapshot orderDoc, List<Map<String, dynamic>> items, bool showReview) {
-    final orderId = orderDoc.id;
+  // ──────────────────────────────────────────────────────────────
+// REPLACE THE ENTIRE _buildActionButton METHOD + ADD THESE TWO
+// ──────────────────────────────────────────────────────────────
 
+  Widget _buildActionButton(
+    BuildContext context,
+    String status,
+    DocumentSnapshot orderDoc,
+    List<Map<String, dynamic>> items,
+    bool showReview,
+  ) {
+    final orderId = orderDoc.id;
+    final orderData = orderDoc.data() as Map<String, dynamic>;
+
+    // 1. Review button (Delivered + not reviewed)
     if (showReview) {
       return OutlinedButton(
         onPressed: () {
           HapticFeedback.lightImpact();
-          Navigator.push(context, MaterialPageRoute(builder: (_) => ReviewOrderScreen(orderId: orderId, items: items)));
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ReviewOrderScreen(orderId: orderId, items: items),
+            ),
+          );
         },
-        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), minimumSize: const Size(0, 0)),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          minimumSize: const Size(0, 0),
+        ),
         child: const Text('Review', style: TextStyle(fontSize: 12)),
       );
     }
 
+    // 2. Processing state — Check payment first!
     if (status == 'Processing') {
+      final String paymentMethod = (orderData['paymentMethod'] ?? '').toString().toLowerCase();
+      final String paymentStatus = (orderData['paymentStatus'] ?? '').toString();
+
+      final bool isGcashPaid = paymentMethod == 'gcash' && paymentStatus == 'Paid';
+
+      if (isGcashPaid) {
+        // GCash already paid → Show "View Details" instead of Cancel
+        return OutlinedButton(
+          onPressed: () {
+            HapticFeedback.lightImpact();
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => OrderDetailsScreen(
+                  orderId: orderId,
+                  orderData: orderData,
+                  items: items,
+                ),
+              ),
+            );
+          },
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            minimumSize: const Size(0, 0),
+          ),
+          child: const Text('View Details', style: TextStyle(fontSize: 12)),
+        );
+      }
+
+      // Not paid → Show Cancel button
       return OutlinedButton(
-        onPressed: () async {
-          HapticFeedback.lightImpact();
-          final confirm = await showDialog<bool>(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Cancel Order'),
-              content: const Text('Are you sure?'),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(_, false), child: const Text('No')),
-                TextButton(onPressed: () => Navigator.pop(_, true), style: TextButton.styleFrom(foregroundColor: Colors.red), child: const Text('Yes')),
-              ],
-            ),
-          );
-          if (confirm == true) {
-            await FirebaseFirestore.instance.collection('orders').doc(orderId).update({'deliveryStatus': 'Cancelled', 'paymentStatus': 'Refunded'});
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Order cancelled'), backgroundColor: Colors.orange));
-          }
-        },
-        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), minimumSize: const Size(0, 0)),
-        child: const Text('Cancel', style: TextStyle(fontSize: 12, color: Colors.red)),
+        onPressed: () => _cancelOrder(context, orderId, items),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          minimumSize: const Size(0, 0),
+          foregroundColor: Colors.red,
+          side: const BorderSide(color: Colors.red),
+        ),
+        child: const Text('Cancel', style: TextStyle(fontSize: 12)),
       );
     }
 
+    // 3. Delivered → Buy Again
     if (status == 'Delivered') {
       return OutlinedButton(
-        onPressed: () {
-          HapticFeedback.lightImpact();
-          _buyAgain(context, items);
-        },
-        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), minimumSize: const Size(0, 0)),
+        onPressed: () => _buyAgain(context, items),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          minimumSize: const Size(0, 0),
+        ),
         child: const Text('Buy Again', style: TextStyle(fontSize: 12)),
       );
     }
 
+    // 4. Default (Shipped, Cancelled, etc.) → View Details
     return OutlinedButton(
       onPressed: () {
         HapticFeedback.lightImpact();
-        Navigator.push(context, MaterialPageRoute(builder: (_) => OrderDetailsScreen(orderId: orderId, orderData: orderDoc.data() as Map<String, dynamic>, items: items)));
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => OrderDetailsScreen(
+              orderId: orderId,
+              orderData: orderData,
+              items: items,
+            ),
+          ),
+        );
       },
-      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), minimumSize: const Size(0, 0)),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        minimumSize: const Size(0, 0),
+      ),
       child: const Text('View Details', style: TextStyle(fontSize: 12)),
     );
   }
 
-  Future<void> _buyAgain(BuildContext context, List<Map<String, dynamic>> items) async {
-    final batch = FirebaseFirestore.instance.batch();
-    final cartRef = FirebaseFirestore.instance.collection('carts').doc(FirebaseAuth.instance.currentUser!.uid).collection('items');
+// ──────────────────────────────────────────────────────────────
+// EXACT SAME LOGIC AS IN ORDER_DETAILS_SCREEN (NOW REUSED)
+// ──────────────────────────────────────────────────────────────
+
+Future<void> _cancelOrder(BuildContext context, String orderId, List<Map<String, dynamic>> items) async {
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      backgroundColor: const Color(0xFF052238),
+      title: const Text('Cancel Order', style: TextStyle(color: Colors.white)),
+      content: const Text('Are you sure you want to cancel this order?', style: TextStyle(color: Colors.white70)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('No', style: TextStyle(color: Colors.white70)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Yes', style: TextStyle(color: Colors.red)),
+        ),
+      ],
+    ),
+  );
+
+  if (confirm != true || !context.mounted) return;
+
+  try {
+    // Fetch fresh order data to check payment method/status
+    final orderDoc = await firestore
+        .collection('orders')
+        .doc(orderId)
+        .get();
+
+    if (!orderDoc.exists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Order not found'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    final paymentMethod = orderDoc['paymentMethod']?.toString() ?? 'cod';
+    final paymentStatus = orderDoc['paymentStatus']?.toString() ?? 'Pending';
+
+    final orderRef = orderDoc.reference;
+    final batch = firestore.batch();
+
+    if (paymentMethod == 'GCash' && paymentStatus == 'Paid') {
+      // Trigger refund via Cloud Function
+      try {
+        await FirebaseFunctions.instance
+            .httpsCallable('refundGcashPayment')
+            .call({'orderId': orderId, 'reason': 'Customer cancelled'});
+
+        // Only update Firestore after successful refund
+        batch.update(orderRef, {
+          'deliveryStatus': 'Cancelled',
+          'paymentStatus': 'Refunded',
+          'cancelledAt': FieldValue.serverTimestamp(),
+          'cancelReason': 'Customer cancelled',
+        });
+
+        // Restore stock
+        for (final item in items) {
+          final productId = item['productId'] ?? item['id'];
+          final qty = (item['quantity'] ?? 1) as int;
+          if (productId != null && productId is String) {
+            final productRef = firestore.collection('products').doc(productId);
+            batch.update(productRef, {'stock': FieldValue.increment(qty)});
+          }
+        }
+
+        await batch.commit();
+
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Order cancelled & refund processed!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Refund failed: $e'), backgroundColor: Colors.red),
+          );
+        }
+        return; // Abort cancellation if refund fails
+      }
+    } else {
+      // COD, unpaid GCash, or other → just cancel normally
+      batch.update(orderRef, {
+        'deliveryStatus': 'Cancelled',
+        'paymentStatus': paymentMethod == 'GCash' ? 'Refunded' : 'Cancelled',
+        'cancelledAt': FieldValue.serverTimestamp(),
+        'cancelReason': 'Customer cancelled',
+      });
+
+      // Restore stock
+      for (final item in items) {
+        final productId = item['productId'] ?? item['id'];
+        final qty = (item['quantity'] ?? 1) as int;
+        if (productId != null && productId is String) {
+          final productRef = firestore.collection('products').doc(productId);
+          batch.update(productRef, {'stock': FieldValue.increment(qty)});
+        }
+      }
+
+      await batch.commit();
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Order cancelled successfully!'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to cancel order: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+}
+
+Future<void> _buyAgain(BuildContext context, List<Map<String, dynamic>> items) async {
+  try {
+    final userId = FirebaseAuth.instance.currentUser!.uid;
+    final batch = firestore.batch();
+    final cartItemsRef = firestore
+        .collection('carts')
+        .doc(userId)
+        .collection('items');
 
     for (final item in items) {
-      final docRef = cartRef.doc();
+      final docRef = cartItemsRef.doc(); // let Firestore generate ID
       batch.set(docRef, {
         'title': item['name'],
         'price': item['price'],
         'qty': item['quantity'],
         'imageUrl': item['imageUrl'],
         'productId': item['productId'],
+        'addedAt': FieldValue.serverTimestamp(),
       });
     }
 
     await batch.commit();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Items added to cart!'), backgroundColor: Colors.green));
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const cart.CartScreen()));
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Items added to cart!'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const cart.CartScreen()),
+      );
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to add to cart: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
+}
 }

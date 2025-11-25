@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:daligas/screens/signin_screen.dart';
+import 'package:daligas/main_mobile.dart';
 
 class CreateUsernameScreen extends StatefulWidget {
   final String userId;
@@ -28,7 +29,7 @@ class _CreateUsernameScreenState extends State<CreateUsernameScreen> {
 
     setState(() => _isChecking = true);
 
-    final result = await FirebaseFirestore.instance
+    final result = await firestore
         .collection('users')
         .where('username', isEqualTo: username)
         .get();
@@ -48,7 +49,7 @@ class _CreateUsernameScreenState extends State<CreateUsernameScreen> {
   Future<void> _saveUsername() async {
     if (!_isAvailable) return;
 
-    await FirebaseFirestore.instance
+    await firestore
         .collection('users')
         .doc(widget.userId)
         .set({

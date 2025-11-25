@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'add_address_screen.dart';
+import 'package:daligas/main_mobile.dart';
 
 class ManageAddressScreen extends StatefulWidget {
   const ManageAddressScreen({super.key});
@@ -21,7 +22,7 @@ class _ManageAddressScreenState extends State<ManageAddressScreen> {
   }
 
   Future<void> _loadAddresses() async {
-    final doc = await FirebaseFirestore.instance
+    final doc = await firestore
         .collection('users')
         .doc(user!.uid)
         .get();
@@ -51,7 +52,7 @@ class _ManageAddressScreenState extends State<ManageAddressScreen> {
       addresses[i]['isActive'] = willBeActive && (i == index);
     }
 
-    await FirebaseFirestore.instance
+    await firestore
         .collection('users')
         .doc(user!.uid)
         .update({'addresses': addresses});
@@ -87,7 +88,7 @@ class _ManageAddressScreenState extends State<ManageAddressScreen> {
         addresses[index] = updatedAddress;
       });
 
-      await FirebaseFirestore.instance
+      await firestore
           .collection('users')
           .doc(user!.uid)
           .update({'addresses': addresses});
@@ -125,7 +126,7 @@ class _ManageAddressScreenState extends State<ManageAddressScreen> {
         addresses.removeAt(index);
       });
 
-      await FirebaseFirestore.instance
+      await firestore
           .collection('users')
           .doc(user!.uid)
           .update({'addresses': addresses});

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:daligas/web/main_web.dart';
 
 // Import your dashboard screens
 import 'super_dashboard_screen.dart';
@@ -20,50 +21,64 @@ class _AdminWelcomeScreenState extends State<AdminWelcomeScreen> {
 
   // The login logic – unchanged
   Future<void> _login() async {
-    setState(() => loading = true);
+  if (loading) return; // prevent double tap
 
-    try {
-      // Login with Firebase Auth
-      final userCredential = await _auth.signInWithEmailAndPassword(
-        email: _usernameController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
+  setState(() => loading = true);
 
-      // Get role from Firestore
-      final uid = userCredential.user!.uid;
-      final doc = await FirebaseFirestore.instance
-          .collection('admins')
-          .doc(uid)
-          .get();
+  try {
+    // 1. Firebase Auth login
+    final userCredential = await _auth.signInWithEmailAndPassword(
+      email: _usernameController.text.trim(),
+      password: _passwordController.text.trim(),
+    );
 
-      if (!doc.exists || !doc.data()!.containsKey('role')) {
-        throw Exception("No role assigned. Contact system administrator.");
-      }
+    // 2. Firestore role check
+    final uid = userCredential.user!.uid;
+    final doc = await FirebaseFirestore.instance
+        .collection('admins')
+        .doc(uid)
+        .get();
 
-      final role = doc['role']; // must be "super" or "admin"
+    // Critical: Check if widget is still mounted after await!
+    if (!mounted) return;
 
-      // Navigate based on role
-      if (role == "super") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => SuperAdminDashboard()),
-        );
-      } else if (role == "admin") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => AdminDashboardScreen()),
-        );
-      } else {
-        throw Exception("Invalid role detected.");
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login failed: ${e.toString()}")),
-      );
+    if (!doc.exists || !doc.data()!.containsKey('role')) {
+      throw Exception("No role assigned. Contact system administrator.");
     }
 
-    setState(() => loading = false);
+    final role = doc['role'] as String;
+
+    // Safe to use context now
+    if (role == "super") {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => SuperAdminDashboard()),
+      );
+    } else if (role == "admin") {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => AdminDashboardScreen()),
+      );
+    } else {
+      throw Exception("Invalid role detected.");
+    }
+  } catch (e) {
+    // Also check mounted before showing SnackBar!
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Login failed: ${e.toString()}"),
+        backgroundColor: Colors.red,
+      ),
+    );
+  } finally {
+    // Only update loading if still mounted
+    if (mounted) {
+      setState(() => loading = false);
+    }
   }
+}
 
   @override
   Widget build(BuildContext context) {

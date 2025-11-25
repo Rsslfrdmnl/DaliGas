@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:daligas/screens/checkout_screen.dart';
+import 'package:daligas/main_mobile.dart';
 
 class CartScreen extends StatefulWidget {
   const CartScreen({super.key});
@@ -16,7 +17,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
   bool editMode = false;
   bool selectAll = false;
   User? user;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore = firestore;
   Stream<QuerySnapshot>? _cartStream;
   Set<String> selectedIds = {};
   Set<String> deletingIds = {};
@@ -63,13 +64,13 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
   }
 
   void _updateCartStream(String uid) {
-    _cartStream = _firestore.collection('cart').doc(uid).collection('items').snapshots();
+    _cartStream = firestore.collection('cart').doc(uid).collection('items').snapshots();
     if (mounted) setState(() {});
   }
 
   Future<void> updateQuantity(String id, int qty) async {
     if (user == null) return;
-    await _firestore
+    await firestore
         .collection('cart')
         .doc(user!.uid)
         .collection('items')
@@ -79,9 +80,9 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
 
   Future<void> _deleteSelectedItems(List<String> ids) async {
     if (user == null) return;
-    final batch = _firestore.batch();
+    final batch = firestore.batch();
     for (final id in ids) {
-      final ref = _firestore.collection('cart').doc(user!.uid).collection('items').doc(id);
+      final ref = firestore.collection('cart').doc(user!.uid).collection('items').doc(id);
       batch.delete(ref);
     }
     await batch.commit();

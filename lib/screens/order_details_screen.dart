@@ -13,6 +13,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:daligas/screens/review_order_screen.dart';
 import 'package:daligas/screens/cart_screen.dart' as cart;
 import 'package:daligas/screens/chat_screen.dart';
+import 'package:daligas/main_mobile.dart';
 
 const String GOOGLE_MAPS_API_KEY = 'AIzaSyAVDDHYb29rt4io-HI0Uq6vfv_GAnlDLlw';
 
@@ -94,7 +95,7 @@ void initState() {
   }
 
   void _listenToDriverLocation() {
-    FirebaseFirestore.instance
+    firestore
         .collection('orders')
         .doc(widget.orderId)
         .snapshots()
@@ -349,7 +350,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   void _listenToDriverLocation() {
-    FirebaseFirestore.instance.collection('orders').doc(widget.orderId).snapshots().listen((doc) {
+    firestore.collection('orders').doc(widget.orderId).snapshots().listen((doc) {
       if (!doc.exists || !mounted) return;
       final data = doc.data()!;
       final lat = data['driverLocation']?['lat'];
@@ -398,7 +399,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   void _listenToOrderStatus() {
-    FirebaseFirestore.instance.collection('orders').doc(widget.orderId).snapshots().listen((doc) {
+    firestore.collection('orders').doc(widget.orderId).snapshots().listen((doc) {
       if (!doc.exists || !mounted) return;
       final data = doc.data()!;
       final newStatus = data['deliveryStatus'] as String? ?? 'Processing';
@@ -428,7 +429,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         final loc = locations.first;
         final newLoc = LatLng(loc.latitude, loc.longitude);
         setState(() => _customerLocation = newLoc);
-        await FirebaseFirestore.instance.collection('orders').doc(widget.orderId).update({
+        await firestore.collection('orders').doc(widget.orderId).update({
           'customerLatLng': {'lat': loc.latitude, 'lng': loc.longitude}
         });
       }
@@ -534,7 +535,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       final employeeId = widget.orderData['employeeId'] as String?;
       if (employeeId == null) return;
 
-      final doc = await FirebaseFirestore.instance.collection('employees').doc(employeeId).get();
+      final doc = await firestore.collection('employees').doc(employeeId).get();
       if (doc.exists && mounted) {
         setState(() {
           _driverPhone = doc['phone'] as String?;
@@ -595,14 +596,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     if (confirm != true || !mounted) return;
 
     try {
-      final batch = FirebaseFirestore.instance.batch();
-      final orderRef = FirebaseFirestore.instance.collection('orders').doc(widget.orderId);
+      final batch = firestore.batch();
+      final orderRef = firestore.collection('orders').doc(widget.orderId);
       batch.update(orderRef, {'deliveryStatus': 'Cancelled', 'paymentStatus': 'Refunded'});
 
       for (final item in widget.items) {
         final productId = item['productId'];
         final qty = (item['quantity'] ?? 1) as int;
-        final productRef = FirebaseFirestore.instance.collection('products').doc(productId);
+        final productRef = firestore.collection('products').doc(productId);
         batch.update(productRef, {'stock': FieldValue.increment(qty)});
       }
 
@@ -617,8 +618,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   Future<void> _buyAgain() async {
-    final batch = FirebaseFirestore.instance.batch();
-    final cartRef = FirebaseFirestore.instance.collection('cart').doc(FirebaseAuth.instance.currentUser!.uid).collection('items');
+    final batch = firestore.batch();
+    final cartRef = firestore.collection('cart').doc(FirebaseAuth.instance.currentUser!.uid).collection('items');
 
     for (final item in widget.items) {
       final docRef = cartRef.doc();
@@ -641,7 +642,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   Future<void> _checkIfReviewed() async {
     for (final item in widget.items) {
       final productId = item['productId'];
-      final snap = await FirebaseFirestore.instance
+      final snap = await firestore
           .collection('products')
           .doc(productId)
           .collection('reviews')
@@ -710,7 +711,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Order #${_shortOrderId(widget.orderId)}...', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                Text('Order #${_shortOrderId(widget.orderId)}', 
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)
+                ),
                 Flexible(
                   child: Text(createdAt != null ? _formatDate(createdAt) : '', style: const TextStyle(color: Colors.white70, fontSize: 14), overflow: TextOverflow.ellipsis, textAlign: TextAlign.end),
                 ),
@@ -749,9 +752,24 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             ]),
             const SizedBox(height: 16),
             const Text('Delivery Info', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 16),
+            const Text('Delivery Info', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             _infoRow('Address', address),
-            _infoRow('Payment', paymentMethod),
+            _infoRow('Payment', () {
+              final paymentStatus = widget.orderData['paymentStatus']?.toString() ?? 'Pending';
+              final paymentMethod = (widget.orderData['paymentMethod']?.toString() ?? 'cod').toLowerCase();
+
+              if (paymentStatus == 'Paid') {
+                return 'Paid via GCash';
+              } else if (paymentStatus == 'Refunded') {
+                return 'Refunded to GCash';
+              } else if (paymentMethod == 'gcash') {
+                return 'GCash (Pending)';
+              } else {
+                return 'Cash on Delivery';
+              }
+            }()),
             const SizedBox(height: 24),
             const Text('Delivery Timeline', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
@@ -820,38 +838,183 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            if (status == 'Processing')
-              SizedBox(width: double.infinity, child: ElevatedButton.icon(onPressed: _cancelOrder, icon: const Icon(Icons.cancel_outlined), label: const Text('Cancel Order'), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B0000), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))))),
-            if (status == 'Delivered') ...[
-              SizedBox(width: double.infinity, child: ElevatedButton.icon(onPressed: _buyAgain, icon: const Icon(Icons.shopping_bag_outlined), label: const Text('Buy Again'), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))))),
-              const SizedBox(height: 8),
-              SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: _hasReviewed ? null : _showReviewModal, icon: Icon(Icons.rate_review_outlined, color: _hasReviewed ? Colors.grey : Colors.blue), label: Text(_hasReviewed ? 'Review Submitted' : 'Leave a Review', style: TextStyle(color: _hasReviewed ? Colors.grey : Colors.blue)), style: OutlinedButton.styleFrom(side: BorderSide(color: _hasReviewed ? Colors.grey : Colors.blue), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))))),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // === Cancel Button Logic (Only show if Processing + NOT paid via GCash) ===
+if (status == 'Processing')
+                () {
+                  final bool isGcashPaid = (widget.orderData['paymentMethod']?.toString().toLowerCase() == 'gcash') &&
+                                           (widget.orderData['paymentStatus']?.toString() == 'Paid');
+
+                  return SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: isGcashPaid ? null : _cancelOrder,
+                      icon: Icon(
+                        isGcashPaid ? Icons.lock_outline : Icons.cancel_outlined,
+                        size: 20,
+                      ),
+                      label: Text(
+                        isGcashPaid
+                            ? 'Cancellation Not Allowed'
+                            : 'Cancel Order',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: isGcashPaid
+                              ? Colors.white.withOpacity(0.45)
+                              : Colors.white,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isGcashPaid
+                            ? Colors.white.withOpacity(0.08)     // Very subtle fill (transparent look)
+                            : const Color(0xFF8B0000),
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.white.withOpacity(0.08),
+                        disabledForegroundColor: Colors.white.withOpacity(0.45),
+                        side: isGcashPaid
+                            ? BorderSide(color: Colors.white.withOpacity(0.2), width: 1)
+                            : BorderSide.none,
+                        elevation: 0,
+                        shadowColor: Colors.transparent,
+                        padding: const EdgeInsets.symmetric(vertical: 18),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  );
+                }(),
+
+              // === Delivered: Buy Again + Review ===
+              if (status == 'Delivered') ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _buyAgain,
+                    icon: const Icon(Icons.shopping_bag_outlined),
+                    label: const Text('Buy Again'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1B5E20),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _hasReviewed ? null : _showReviewModal,
+                    icon: Icon(
+                      Icons.rate_review_outlined,
+                      color: _hasReviewed ? Colors.grey : Colors.blue,
+                    ),
+                    label: Text(
+                      _hasReviewed ? 'Review Submitted' : 'Leave a Review',
+                      style: TextStyle(color: _hasReviewed ? Colors.grey : Colors.blue),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: _hasReviewed ? Colors.grey : Colors.blue),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+              ],
+
+              // === Shipped: Contact Driver + Chat ===
+              if (_currentStatus == 'Shipped') ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _driverPhone != null ? _contactDriver : null,
+                    icon: _isLoadingPhone
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.phone, color: Colors.white),
+                    label: Text(
+                      _isLoadingPhone
+                          ? 'Loading driver...'
+                          : _driverName != null
+                              ? 'Contact $_driverName ($_driverPhone)'
+                              : _driverPhone != null
+                                  ? 'Contact Driver ($_driverPhone)'
+                                  : 'Driver phone unavailable',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1976D2),
+                      elevation: 3,
+                      shadowColor: Colors.blue.withOpacity(0.4),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _driverName != null ? _openDriverChat : null,
+                    icon: const Icon(Icons.chat, color: Colors.white),
+                    label: Text(
+                      _driverName != null ? 'Chat with $_driverName' : 'Loading driver...',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF25D366),
+                      elevation: 3,
+                      shadowColor: Colors.green.withOpacity(0.4),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                  ),
+                ),
+              ],
             ],
-            if (_currentStatus == 'Shipped') ...[
-              const SizedBox(height: 12),
-              SizedBox(width: double.infinity, child: ElevatedButton.icon(onPressed: _driverPhone != null ? _contactDriver : null, icon: _isLoadingPhone ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.phone, color: Colors.white), label: Text(_isLoadingPhone ? 'Loading driver...' : _driverName != null ? 'Contact $_driverName ($_driverPhone)' : _driverPhone != null ? 'Contact Driver ($_driverPhone)' : 'Driver phone unavailable', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1976D2), elevation: 3, shadowColor: Colors.blue.withOpacity(0.4), padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))))),
-              const SizedBox(height: 8),
-              SizedBox(width: double.infinity, child: ElevatedButton.icon(onPressed: _driverName != null ? _openDriverChat : null, icon: const Icon(Icons.chat, color: Colors.white), label: Text(_driverName != null ? 'Chat with $_driverName' : 'Loading driver...', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366), elevation: 3, shadowColor: Colors.blue.withOpacity(0.4), padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))))),
-            ],
-          ]),
+          ),
         ),
       ),
     );
   }
 
   Widget _infoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: 100, child: Text('$label:', style: const TextStyle(color: Colors.white70))),
-          Expanded(child: Text(value, style: const TextStyle(color: Colors.white))),
-        ],
-      ),
-    );
-  }
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 120,
+          child: Text(
+            '$label:',
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              color: value.contains('Paid') || value == 'Paid'
+                  ? Colors.green
+                  : value.contains('Refunded')
+                      ? Colors.orange
+                      : Colors.white70,
+              fontWeight: value.contains('Paid') || value.contains('Refunded')
+                  ? FontWeight.bold
+                  : FontWeight.normal,
+              fontSize: 15,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _timelineStep(String title, bool completed, {bool isLast = false}) {
     return Row(children: [
@@ -864,7 +1027,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     ]);
   }
 
-  String _getStatusText(String status) => switch (status) {
+    String _getStatusText(String status) => switch (status) {
         'Processing' => 'Processing',
         'Shipped' => 'Out for delivery',
         'Delivered' => 'Delivered',
@@ -881,9 +1044,17 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       };
 
   String _formatDate(DateTime date) {
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
     return '${months[date.month - 1]} ${date.day}, ${date.year}';
   }
 
-  String _shortOrderId(String fullId) => fullId.length > 12 ? fullId.substring(fullId.length - 12) : fullId;
+  String _shortOrderId(String fullId) {
+  if (fullId.length > 12) {
+    return '${fullId.substring(0, 12)}...';
+  }
+  return fullId;
+ }
 }

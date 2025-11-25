@@ -9,6 +9,7 @@ import 'package:daligas/screens/cart_screen.dart' as cart;
 import 'package:daligas/screens/home_screen.dart';
 import 'package:daligas/screens/messages_screen.dart';
 import 'package:daligas/screens/purchases_screen.dart';
+import 'package:daligas/main_mobile.dart';
 
 class HelpScreen extends StatefulWidget {
   final int currentIndex;
@@ -127,7 +128,7 @@ class _HelpScreenState extends State<HelpScreen> {
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      await FirebaseFirestore.instance.collection('help_inquiries').add({
+      await firestore.collection('help_inquiries').add({
         'uid': user?.uid,
         'email': user?.email,
         'message': message,

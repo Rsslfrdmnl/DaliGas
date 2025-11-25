@@ -10,6 +10,7 @@ import 'package:daligas/screens/chat_screen.dart';
 import 'package:daligas/screens/help_screen.dart';
 import 'package:daligas/screens/home_screen.dart';
 import 'package:daligas/screens/purchases_screen.dart';
+import 'package:daligas/main_mobile.dart';
 import 'package:intl/intl.dart';
 
 class MessagesScreen extends StatefulWidget {
@@ -68,7 +69,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
   // REAL-TIME + BATCHED EMPLOYEE NAMES
   Stream<List<Map<String, dynamic>>> _messagesStream() {
     final userId = FirebaseAuth.instance.currentUser!.uid;
-    final ordersRef = FirebaseFirestore.instance
+    final ordersRef = firestore
         .collection('orders')
         .where('userId', isEqualTo: userId)
         .where('deliveryStatus', isEqualTo: 'Shipped');
@@ -95,7 +96,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
       }
 
       // BATCH FETCH EMPLOYEE NAMES
-      final empSnaps = await FirebaseFirestore.instance
+      final empSnaps = await firestore
           .collection('employees')
           .where(FieldPath.documentId, whereIn: employeeIds.toList())
           .get();
@@ -119,14 +120,14 @@ class _MessagesScreenState extends State<MessagesScreen> {
             DocumentSnapshot<Map<String, dynamic>>,
             QuerySnapshot<Map<String, dynamic>>,
             Map<String, dynamic>>(
-          FirebaseFirestore.instance.collection('chats').doc(chatId).snapshots(),
-          FirebaseFirestore.instance
+          firestore.collection('chats').doc(chatId).snapshots(),
+          firestore
               .collection('chats')
               .doc(chatId)
               .collection('metadata')
               .doc('info')
               .snapshots(),
-          FirebaseFirestore.instance
+          firestore
               .collection('chats')
               .doc(chatId)
               .collection('messages')
@@ -218,7 +219,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   Stream<int> _unreadCountStream() {
     final userId = FirebaseAuth.instance.currentUser!.uid;
-    return FirebaseFirestore.instance
+    return firestore
         .collection('orders')
         .where('userId', isEqualTo: userId)
         .where('deliveryStatus', isEqualTo: 'Shipped')
@@ -230,7 +231,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
         if (employeeId == null) continue;
         final chatId = '${userId}_$employeeId}_${doc.id}';
 
-        final s = FirebaseFirestore.instance
+        final s = firestore
             .collection('chats')
             .doc(chatId)
             .collection('messages')
@@ -270,7 +271,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
       );
 
   Future<void> _deleteChat(String chatId) async {
-    await FirebaseFirestore.instance
+    await firestore
         .collection('chats')
         .doc(chatId)
         .set({'deletedByCustomer': true}, SetOptions(merge: true));
@@ -279,14 +280,14 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   Future<void> _togglePinChat(String chatId, bool currentStatus) async {
     final userId = FirebaseAuth.instance.currentUser!.uid;
-    final userRef = FirebaseFirestore.instance.collection('users').doc(userId);
+    final userRef = firestore.collection('users').doc(userId);
 
     try {
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
+      await firestore.runTransaction((transaction) async {
         final userSnap = await transaction.get(userRef);
         int pinnedCount = userSnap.data()?['pinnedChatsCount'] ?? 0;
 
-        final metaRef = FirebaseFirestore.instance
+        final metaRef = firestore
             .collection('chats')
             .doc(chatId)
             .collection('metadata')
@@ -312,7 +313,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   Future<void> _toggleReadStatus(String chatId) async {
     final uid = FirebaseAuth.instance.currentUser!.uid;
-    final latest = await FirebaseFirestore.instance
+    final latest = await firestore
         .collection('chats')
         .doc(chatId)
         .collection('messages')
@@ -329,7 +330,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   Future<void> _markAsRead(String chatId) async {
     final uid = FirebaseAuth.instance.currentUser!.uid;
-    final unread = await FirebaseFirestore.instance
+    final unread = await firestore
         .collection('chats')
         .doc(chatId)
         .collection('messages')
@@ -343,7 +344,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   Future<void> _markAllAsRead() async {
     final userId = FirebaseAuth.instance.currentUser!.uid;
-    final orders = await FirebaseFirestore.instance
+    final orders = await firestore
         .collection('orders')
         .where('userId', isEqualTo: userId)
         .where('deliveryStatus', isEqualTo: 'Shipped')
@@ -648,7 +649,7 @@ class _MessageCardState extends State<MessageCard> {
                       Stack(
                         children: [
                           FutureBuilder<DocumentSnapshot>(
-                            future: FirebaseFirestore.instance.collection('employees').doc(employeeId).get(),
+                            future: firestore.collection('employees').doc(employeeId).get(),
                             builder: (context, snapshot) {
                               String? imageUrl = snapshot.hasData && snapshot.data!.exists
                                   ? snapshot.data!['profileImage'] as String?

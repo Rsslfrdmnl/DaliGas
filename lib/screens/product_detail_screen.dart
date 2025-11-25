@@ -12,6 +12,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
+import 'package:daligas/main_mobile.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final Map<String, dynamic> product;
@@ -132,7 +133,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> with TickerPr
     });
 
     try {
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(_currentUser!.uid).get();
+      final userDoc = await firestore.collection('users').doc(_currentUser!.uid).get();
       final username = userDoc['username'] ?? 'Anonymous';
 
       List<String> imageUrls = [];
@@ -140,7 +141,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> with TickerPr
         imageUrls = await _uploadImages();
       }
 
-      await FirebaseFirestore.instance
+      await firestore
           .collection('products')
           .doc(productId)
           .collection('comments')
@@ -245,7 +246,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> with TickerPr
 
                       // LIVE RATING + STOCK
                       StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance.collection('products').doc(productId).collection('reviews').snapshots(),
+                        stream: firestore.collection('products').doc(productId).collection('reviews').snapshots(),
                         builder: (context, snapshot) {
                           double liveRating = 0.0;
                           int reviewCount = 0;
@@ -290,7 +291,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> with TickerPr
                       const Text('User Reviews', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF0D2236))),
                       const SizedBox(height: 8),
                       StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance.collection('products').doc(productId).collection('reviews').orderBy('createdAt', descending: true).limit(2).snapshots(),
+                        stream: firestore.collection('products').doc(productId).collection('reviews').orderBy('createdAt', descending: true).limit(2).snapshots(),
                         builder: (context, snapshot) {
                           if (snapshot.connectionState == ConnectionState.waiting) {
                             return const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()));
@@ -309,7 +310,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> with TickerPr
                             final dateStr = date != null ? '${date.month}/${date.day}/${date.year}' : 'Just now';
 
                             return FutureBuilder<DocumentSnapshot>(
-                              future: FirebaseFirestore.instance.collection('users').doc(userId).get(),
+                              future: firestore.collection('users').doc(userId).get(),
                               builder: (context, userSnap) {
                                 final username = userSnap.data?.get('username') ?? 'Anonymous';
                                 return Container(
@@ -357,7 +358,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> with TickerPr
                       const Text('Comments', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF0D2236))),
                       const SizedBox(height: 8),
                       StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance.collection('products').doc(productId).collection('comments').orderBy('timestamp', descending: true).limit(2).snapshots(),
+                        stream: firestore.collection('products').doc(productId).collection('comments').orderBy('timestamp', descending: true).limit(2).snapshots(),
                         builder: (context, snapshot) {
                           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
                           final docs = snapshot.data!.docs;

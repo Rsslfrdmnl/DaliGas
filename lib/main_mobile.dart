@@ -1,5 +1,4 @@
-// lib/main_mobile.dart
-import 'dart:convert'; // ← ADDED FOR JSON
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -23,6 +22,14 @@ import 'package:daligas/screens/employee_orders_screen.dart';
 // Global Navigator Key
 // ------------------------------------------------------------
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+// ------------------------------------------------------------
+// GLOBAL SINGAPORE FIRESTORE INSTANCE (asia-southeast1 - daligas DB)
+// ------------------------------------------------------------
+final FirebaseFirestore firestore = FirebaseFirestore.instanceFor(
+  app: Firebase.app(),  // ← REQUIRED PARAMETER - uses default Firebase app
+  databaseId: 'daligas',
+);
 
 // ------------------------------------------------------------
 // Local Notifications Setup
@@ -116,7 +123,7 @@ Future<void> main() async {
 
     // Determine collection
     String collection = 'users';
-    final empDoc = await FirebaseFirestore.instance
+    final empDoc = await firestore
         .collection('employees')
         .doc(user.uid)
         .get();
@@ -124,7 +131,7 @@ Future<void> main() async {
       collection = 'employees';
     }
 
-    final parentCollection = FirebaseFirestore.instance.collection(collection);
+    final parentCollection = firestore.collection(collection);
     final userDoc = await parentCollection.doc(user.uid).get();
     final docData = userDoc.data() as Map<String, dynamic>?;
     final prefs = (docData?['notifications'] as Map<String, dynamic>?) ?? {};
@@ -219,7 +226,7 @@ Future<void> _handleNotificationTap(RemoteMessage message) async {
     if (user == null) return;
 
     bool isEmployee = false;
-    final empDoc = await FirebaseFirestore.instance
+    final empDoc = await firestore
         .collection('employees')
         .doc(user.uid)
         .get();
@@ -246,7 +253,7 @@ Future<void> _handleNotificationTap(RemoteMessage message) async {
     final orderId = data['orderId'] as String;
 
     try {
-      final orderDoc = await FirebaseFirestore.instance
+      final orderDoc = await firestore
           .collection('orders')
           .doc(orderId)
           .get();
@@ -259,7 +266,7 @@ Future<void> _handleNotificationTap(RemoteMessage message) async {
       }
 
       final orderData = orderDoc.data()!;
-      final itemsSnap = await FirebaseFirestore.instance
+      final itemsSnap = await firestore
           .collection('orders')
           .doc(orderId)
           .collection('items')
@@ -294,7 +301,7 @@ Future<void> saveFcmToken(User user, {String? newToken}) async {
   String collection = 'users';
   String? role;
 
-  final empDoc = await FirebaseFirestore.instance
+  final empDoc = await firestore
       .collection('employees')
       .doc(user.uid)
       .get();
@@ -302,7 +309,7 @@ Future<void> saveFcmToken(User user, {String? newToken}) async {
     role = empDoc.data()?['role'] as String?;
     if (role == 'employee') collection = 'employees';
   } else {
-    final userDoc = await FirebaseFirestore.instance
+    final userDoc = await firestore
         .collection('users')
         .doc(user.uid)
         .get();
@@ -312,7 +319,7 @@ Future<void> saveFcmToken(User user, {String? newToken}) async {
     }
   }
 
-  final ref = FirebaseFirestore.instance.collection(collection).doc(user.uid);
+  final ref = firestore.collection(collection).doc(user.uid);
   final doc = await ref.get();
 
   try {
@@ -378,7 +385,7 @@ class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
   Future<Widget> _getHomeScreen(User user) async {
-    final empDoc = await FirebaseFirestore.instance
+    final empDoc = await firestore
         .collection('employees')
         .doc(user.uid)
         .get();

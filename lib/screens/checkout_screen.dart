@@ -5,6 +5,10 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:daligas/screens/order_success_screen.dart';
 import 'package:daligas/screens/manage_address_screen.dart';
 import 'package:daligas/screens/purchases_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:daligas/screens/gcash_payment_screen.dart';
+import 'package:daligas/services/firebase_functions.dart'; 
+import 'package:daligas/main_mobile.dart';
 
 class CheckoutScreen extends StatefulWidget {
   final Map<String, dynamic>? product;
@@ -22,11 +26,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   String activeAddress = 'Getting address...';
   String _paymentMethod = 'cod';
   bool _isPlacingOrder = false;
+  bool _hasShownGcashInfo = false; // Prevents spam dialog
 
   final user = FirebaseAuth.instance.currentUser;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore = firestore;
 
-  late final List<Map<String, dynamic>> checkoutItems; // ← final
+  late final List<Map<String, dynamic>> checkoutItems;
 
   @override
   void initState() {
@@ -42,7 +47,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     if (user == null || !mounted) return;
 
     try {
-      final userDoc = await _firestore.collection('users').doc(user!.uid).get();
+      final userDoc = await firestore.collection('users').doc(user!.uid).get();
       if (!userDoc.exists) {
         if (mounted) {
           setState(() {
@@ -135,8 +140,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   Future<void> _clearCart() async {
     if (user == null) return;
-    final batch = _firestore.batch();
-    final cartItems = await _firestore.collection('cart').doc(user!.uid).collection('items').get();
+    final batch = firestore.batch();
+    final cartItems = await firestore.collection('cart').doc(user!.uid).collection('items').get();
 
     for (var doc in cartItems.docs) {
       batch.delete(doc.reference);
@@ -144,16 +149,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     await batch.commit();
   }
 
-  @override
+@override
   Widget build(BuildContext context) {
     const Color darkBlue = Color(0xFF001B33);
-
     return Scaffold(
       backgroundColor: darkBlue,
       appBar: AppBar(
         backgroundColor: darkBlue,
         elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: const Text('Checkout', style: TextStyle(color: Colors.white)),
       ),
       body: SingleChildScrollView(
@@ -243,25 +250,91 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  Widget _buildPaymentMethods() {
+Widget _buildPaymentMethods() {
     return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(padding: EdgeInsets.fromLTRB(12, 12, 12, 8), child: Text('Payment Method', style: TextStyle(fontWeight: FontWeight.bold))),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text('Payment Method', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ),
+
+          // Cash on Delivery
           RadioListTile<String>(
             title: const Text('Cash on Delivery (COD)'),
+            subtitle: const Text('Pay when your order arrives', style: TextStyle(fontSize: 13)),
             secondary: const Icon(Icons.local_shipping, color: Colors.orange),
             value: 'cod',
             groupValue: _paymentMethod,
-            onChanged: (v) => setState(() => _paymentMethod = v!),
+            onChanged: (v) => setState(() {
+              _paymentMethod = v!;
+              _hasShownGcashInfo = false;
+            }),
           ),
+
+          // GCash — Super Friendly Version
           RadioListTile<String>(
-            title: const Text('E-Wallet (Coming Soon)'),
-            secondary: const Icon(Icons.account_balance_wallet, color: Colors.grey),
+            title: const Text('GCash'),
+            subtitle: const Text('Fast & instant payment', style: TextStyle(fontSize: 13, color: Colors.green)),
+            secondary: Image.asset('assets/images/gcash.png', width: 44),
             value: 'ewallet',
             groupValue: _paymentMethod,
-            onChanged: null,
+            onChanged: (v) async {
+              if (_paymentMethod == 'ewallet') return;
+
+              final confirm = await showDialog<bool>(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => AlertDialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  title: const Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.blue, size: 28),
+                      SizedBox(width: 12),
+                      Expanded(child: Text('Just so you know!', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18))),
+                    ],
+                  ),
+                  content: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.green, size: 60),
+                      SizedBox(height: 16),
+                      Text(
+                        'GCash payments are instant and final.\n\n'
+                        'This helps us prepare and deliver your order faster!\n\n'
+                        'Once paid, the order cannot be cancelled — but don’t worry, we’ve got you covered with great service',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 15, height: 1.6),
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () =>  Navigator.pop(context, false),
+                      child: const Text('I’ll use COD instead'),
+                    ),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.payment, color: Colors.white),
+                      label: const Text('Pay with GCash'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      ),
+                      onPressed: () => Navigator.pop(context, true),
+                    ),
+                  ],
+                ),
+              );
+
+              if (confirm == true) {
+                setState(() {
+                  _paymentMethod = v!;
+                  _hasShownGcashInfo = true;
+                });
+              }
+            },
           ),
         ],
       ),
@@ -326,6 +399,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 const Text('Total', style: TextStyle(fontWeight: FontWeight.bold)),
                 Text('₱${totalPrice.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.red)),
               ],
+
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -344,50 +418,40 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  Future<void> _placeOrder() async {
-    if (user == null) {
-      _showSnackBar('Please log in to place an order.');
-      return;
-    }
+Future<void> _placeOrder() async {
+  if (user == null) {
+    _showSnackBar('Please log in to place an order.');
+    return;
+  }
+  if (checkoutItems.isEmpty) {
+    _showSnackBar('Your cart is empty.');
+    return;
+  }
+  if (activeAddress.contains('No active') || activeAddress.contains('Failed')) {
+    _showSnackBar('Please set a valid delivery address.');
+    return;
+  }
 
-    if (checkoutItems.isEmpty) {
-      _showSnackBar('Your cart is empty.');
-      return;
-    }
+  setState(() => _isPlacingOrder = true);
 
-    if (activeAddress.contains('No active') || activeAddress.contains('Fetching') || activeAddress.contains('Failed')) {
-      _showSnackBar('Please set a valid delivery address.');
-      return;
-    }
-
-    if (_paymentMethod == 'ewallet') {
-      _showSnackBar('E-Wallet is coming soon! Please use COD for now.');
-      return;
-    }
-
-    setState(() => _isPlacingOrder = true);
-
-    try {
-      final items = checkoutItems.map((item) {
-        return {
-          'productId': item['id'],
-          'name': item['name'],
-          'price': item['price'],
-          'quantity': item['quantity'],
-          'imageUrl': item['imageUrl'],
-        };
-      }).toList();
-
-      final callable = FirebaseFunctions.instance.httpsCallable('createOrder');
-      final result = await callable.call({
+  try {
+    // FIX: Use the global 'functions' instance from main_mobile.dart
+    if (_paymentMethod == 'cod') {
+      final callable = functions.httpsCallable('createOrder'); // ← NOW GOES TO SINGAPORE
+      final result = await callable({
         'userId': user!.uid,
-        'items': items,
-        'paymentMethod': _paymentMethod,
+        'items': checkoutItems.map((i) => {
+          'productId': i['id'],
+          'name': i['name'],
+          'price': i['price'],
+          'quantity': i['quantity'],
+          'imageUrl': i['imageUrl'],
+        }).toList(),
+        'paymentMethod': 'cod',
         'deliveryAddress': activeAddress,
       });
 
       final orderId = result.data['orderId'] as String;
-
       await _clearCart();
 
       if (mounted) {
@@ -397,12 +461,46 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           (route) => false,
         );
       }
-    } catch (e) {
-      _showSnackBar('Order failed: ${e.toString()}');
-    } finally {
-      if (mounted) setState(() => _isPlacingOrder = false);
     }
+    else if (_paymentMethod == 'ewallet') {
+      final callable = functions.httpsCallable('createPaymongoPayment'); // ← NOW WORKS!
+      final result = await callable({
+        'userId': user!.uid,
+        'items': checkoutItems.map((i) => {
+          'productId': i['id'],
+          'name': i['name'],
+          'price': i['price'],
+          'quantity': i['quantity'],
+          'imageUrl': i['imageUrl'],
+        }).toList(),
+        'deliveryAddress': activeAddress,
+      });
+
+      final redirectUrl = result.data['redirectUrl'] as String;
+      final orderId = result.data['orderId'] as String;
+
+      await _clearCart();
+
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => GcashPaymentScreen(
+              paymentUrl: redirectUrl,
+              orderAmount: '₱${totalPrice.toStringAsFixed(2)}',
+              pendingOrderId: orderId,
+            ),
+          ),
+        );
+      }
+    }
+  } catch (e) {
+    print('Full error: $e'); // ← Add this for debugging
+    _showSnackBar('Order failed: ${e.toString()}');
+  } finally {
+    if (mounted) setState(() => _isPlacingOrder = false);
   }
+}
 
   void _showSnackBar(String message) {
     if (!mounted) return;

@@ -1,8 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:daligas/main_mobile.dart';
 
 class CartService {
-  final _firestore = FirebaseFirestore.instance;
+  final _firestore = firestore;
   final _auth = FirebaseAuth.instance;
 
   /// Add product to Firestore cart
@@ -10,7 +11,7 @@ class CartService {
     final user = _auth.currentUser;
     if (user == null) throw Exception("User not logged in.");
 
-    final cartItemRef = _firestore
+    final cartItemRef = firestore
         .collection('cart')
         .doc(user.uid)
         .collection('items')
@@ -39,7 +40,7 @@ class CartService {
   Stream<QuerySnapshot> getCartItemsStream() {
     final user = _auth.currentUser;
     if (user == null) throw Exception("User not logged in.");
-    return _firestore
+    return firestore
         .collection('cart')
         .doc(user.uid)
         .collection('items')
@@ -51,7 +52,7 @@ class CartService {
   Future<void> updateQty(String id, int qty) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception("User not logged in.");
-    await _firestore
+    await firestore
         .collection('cart')
         .doc(user.uid)
         .collection('items')
@@ -63,7 +64,7 @@ class CartService {
   Future<void> removeItem(String id) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception("User not logged in.");
-    await _firestore
+    await firestore
         .collection('cart')
         .doc(user.uid)
         .collection('items')
@@ -77,7 +78,7 @@ class CartService {
     if (user == null) throw Exception("User not logged in.");
 
     final cartItems =
-        await _firestore.collection('cart').doc(user.uid).collection('items').get();
+        await firestore.collection('cart').doc(user.uid).collection('items').get();
 
     for (final doc in cartItems.docs) {
       await doc.reference.delete();

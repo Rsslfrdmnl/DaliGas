@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:daligas/main_mobile.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -32,7 +33,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
 
     try {
-      final doc = await FirebaseFirestore.instance
+      final doc = await firestore
           .collection('users')
           .doc(user!.uid)
           .get();
@@ -61,7 +62,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     setState(() => isSaving = true);
 
     try {
-      await FirebaseFirestore.instance.collection('users').doc(user!.uid).set({
+      await firestore.collection('users').doc(user!.uid).set({
         'notifications': {
           'orderUpdates': orderUpdates,
           'deliveryReminders': deliveryReminders,

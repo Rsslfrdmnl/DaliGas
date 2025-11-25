@@ -1,9 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:daligas/main_mobile.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore = firestore;
 
   // Get current logged-in user
   User? get currentUser => _auth.currentUser;
@@ -25,7 +26,7 @@ class AuthService {
 
       // 2️⃣ Save extra data to Firestore
       if (user != null) {
-        await _firestore.collection('users').doc(user.uid).set({
+        await firestore.collection('users').doc(user.uid).set({
           'uid': user.uid,
           'fullName': fullName,
           'email': email,
@@ -80,7 +81,7 @@ class AuthService {
       final user = _auth.currentUser;
       if (user == null) return null;
 
-      final doc = await _firestore.collection('users').doc(user.uid).get();
+      final doc = await firestore.collection('users').doc(user.uid).get();
       if (doc.exists) {
         return doc['role'] as String?;
       }

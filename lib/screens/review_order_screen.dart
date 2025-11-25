@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:daligas/main_mobile.dart';
 
 class ReviewOrderScreen extends StatefulWidget {
   final String orderId;
@@ -204,10 +205,10 @@ class _ReviewOrderScreenState extends State<ReviewOrderScreen>
       _spinController.repeat();
     });
 
-    final batch = FirebaseFirestore.instance.batch();
+    final batch = firestore.batch();
 
     try {
-      final userDoc = await FirebaseFirestore.instance
+      final userDoc = await firestore
           .collection('users')
           .doc(user.uid)
           .get();
@@ -220,7 +221,7 @@ class _ReviewOrderScreenState extends State<ReviewOrderScreen>
 
         if (itemRating == 0) continue;
 
-        final reviewRef = FirebaseFirestore.instance
+        final reviewRef = firestore
             .collection('products')
             .doc(productId)
             .collection('reviews')
@@ -239,8 +240,8 @@ class _ReviewOrderScreenState extends State<ReviewOrderScreen>
 
         // Update product rating & count
         final productRef =
-            FirebaseFirestore.instance.collection('products').doc(productId);
-        await FirebaseFirestore.instance.runTransaction((tx) async {
+            firestore.collection('products').doc(productId);
+        await firestore.runTransaction((tx) async {
           final snap = await tx.get(productRef);
           if (!snap.exists) return;
 

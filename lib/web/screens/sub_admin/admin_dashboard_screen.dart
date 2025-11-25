@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // ✅ added
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:daligas/web/screens/super_admin/admin_welcome_screen.dart';
+import 'package:daligas/web/main_web.dart';
 import 'admin_orders_screen.dart';
 import 'admin_inventory_screen.dart';
 import 'admin_delivery_screen.dart';
@@ -18,6 +20,9 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+  // REMOVED: StreamSubscription list & dispose() → causes crash on Web
+  // ← These two lines were the only culprits left
+
   Future<void> _logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
     if (context.mounted) {
@@ -41,87 +46,37 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             children: [
               Transform.translate(
                 offset: const Offset(-10, 0),
-                child: Image.asset(
-                  "assets/images/daligas_logo.png",
-                  height: 80,
-                ),
+                child: Image.asset("assets/images/daligas_logo.png", height: 80),
               ),
               Transform.translate(
                 offset: const Offset(-22, 0),
                 child: const Text(
                   "DALI GAS",
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
+                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.white),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 30),
 
-          // Sidebar items
           _SidebarItem(Icons.dashboard, "Dashboard", true, () {}),
           _SidebarItem(Icons.shopping_cart, "Orders", false, () {
-            Navigator.pushReplacement(
-              context,
-              PageRouteBuilder(
-                pageBuilder: (_, __, ___) => const AdminOrdersScreen(),
-                transitionDuration: Duration.zero,
-                reverseTransitionDuration: Duration.zero,
-              ),
-            );
+            _navigateTo(const AdminOrdersScreen());
           }),
           _SidebarItem(Icons.inventory, "Inventory", false, () {
-            Navigator.pushReplacement(
-              context,
-              PageRouteBuilder(
-                pageBuilder: (_, __, ___) => const AdminInventoryScreen(),
-                transitionDuration: Duration.zero,
-                reverseTransitionDuration: Duration.zero,
-              ),
-            );
+            _navigateTo(const AdminInventoryScreen());
           }),
           _SidebarItem(Icons.local_shipping, "Delivery Management", false, () {
-            Navigator.pushReplacement(
-              context,
-              PageRouteBuilder(
-                pageBuilder: (_, __, ___) => const AdminDeliveryScreen(),
-                transitionDuration: Duration.zero,
-                reverseTransitionDuration: Duration.zero,
-              ),
-            );
+            _navigateTo(const AdminDeliveryScreen());
           }),
           _SidebarItem(Icons.feedback, "Feedback", false, () {
-            Navigator.pushReplacement(
-              context,
-              PageRouteBuilder(
-                pageBuilder: (_, __, ___) => const AdminFeedbackScreen(),
-                transitionDuration: Duration.zero,
-                reverseTransitionDuration: Duration.zero,
-              ),
-            );
+            _navigateTo(const AdminFeedbackScreen());
           }),
           _SidebarItem(Icons.assignment, "Reports", false, () {
-            Navigator.pushReplacement(
-              context,
-              PageRouteBuilder(
-                pageBuilder: (_, __, ___) => const AdminReportsScreen(),
-                transitionDuration: Duration.zero,
-                reverseTransitionDuration: Duration.zero,
-              ),
-            );
+            _navigateTo(const AdminReportsScreen());
           }),
           _SidebarItem(Icons.settings, "Settings", false, () {
-            Navigator.pushReplacement(
-              context,
-              PageRouteBuilder(
-                pageBuilder: (_, __, ___) => const AdminSettingsScreen(),
-                transitionDuration: Duration.zero,
-                reverseTransitionDuration: Duration.zero,
-              ),
-            );
+            _navigateTo(const AdminSettingsScreen());
           }),
 
           const Spacer(),
@@ -132,16 +87,41 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // ✅ Real-time stat cards
-  Widget _buildLiveStatCard(String title, IconData icon, Color color, Stream<QuerySnapshot> stream) {
+  void _navigateTo(Widget page) {
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => page,
+        transitionDuration: Duration.zero,
+      ),
+    );
+  }
+
+  // ENHANCED: Supports client-side filtering (needed for "Today" count)
+  Widget _buildLiveStatCard({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required Stream<QuerySnapshot> stream,
+    String Function(AsyncSnapshot<QuerySnapshot>)? builderOverride,
+  }) {
     return StreamBuilder<QuerySnapshot>(
       stream: stream,
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return _buildStatCard(title, '...', icon, color);
+        String value = '...';
+
+        if (snapshot.hasError) {
+          value = 'Error';
+        } else if (snapshot.hasData) {
+          if (builderOverride != null) {
+            value = builderOverride(snapshot);
+          } else {
+            value = snapshot.data!.docs.length.toString();
+          }
         }
-        final count = snapshot.data!.docs.length.toString();
-        return _buildStatCard(title, count, icon, color);
+
+        return _buildStatCard(title, value, icon, color);
       },
     );
   }
@@ -163,12 +143,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(value,
-                    style: const TextStyle(
-                        fontSize: 22, fontWeight: FontWeight.bold)),
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 14, color: Colors.black54)),
+                Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                Text(title, style: const TextStyle(fontSize: 14, color: Colors.black54)),
               ],
             ),
           ],
@@ -177,128 +153,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildOrdersChart() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Orders",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 250,
-              child: LineChart(
-                LineChartData(
-                  gridData: FlGridData(show: false),
-                  titlesData: FlTitlesData(
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: true),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-                          if (value.toInt() >= 0 && value.toInt() < days.length) {
-                            return Text(days[value.toInt()]);
-                          }
-                          return const Text("");
-                        },
-                      ),
-                    ),
-                  ),
-                  borderData: FlBorderData(show: true),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: const [
-                        FlSpot(0, 5),
-                        FlSpot(1, 12),
-                        FlSpot(2, 10),
-                        FlSpot(3, 25),
-                        FlSpot(4, 8),
-                        FlSpot(5, 20),
-                        FlSpot(6, 35),
-                      ],
-                      isCurved: true,
-                      color: Colors.blue,
-                      barWidth: 3,
-                      dotData: FlDotData(show: false),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDeliveryChart() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Delivery Performance",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 250,
-              child: BarChart(
-                BarChartData(
-                  gridData: FlGridData(show: false),
-                  titlesData: FlTitlesData(
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          switch (value.toInt()) {
-                            case 0:
-                              return const Text("Delivered");
-                            case 1:
-                              return const Text("Late");
-                            case 2:
-                              return const Text("Cancelled");
-                          }
-                          return const Text("");
-                        },
-                      ),
-                    ),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: true),
-                    ),
-                  ),
-                  borderData: FlBorderData(show: true),
-                  barGroups: [
-                    BarChartGroupData(
-                      x: 0,
-                      barRods: [BarChartRodData(toY: 9, color: Colors.blue)],
-                    ),
-                    BarChartGroupData(
-                      x: 1,
-                      barRods: [BarChartRodData(toY: 6, color: Colors.orange)],
-                    ),
-                    BarChartGroupData(
-                      x: 2,
-                      barRods: [BarChartRodData(toY: 2, color: Colors.red)],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Timestamp get _startOfToday => Timestamp.fromDate(
+        DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -313,71 +170,98 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text("Welcome Sub Admin",
-                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  const Text(
+                    "Welcome, Sub Admin",
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 20),
 
-                  // ✅ Real-time stat cards
+                  // ROW 1: New Orders + Deliveries in Progress
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
                         child: _buildLiveStatCard(
-                          "New Orders",
-                          Icons.shopping_cart,
-                          Colors.blue,
-                          FirebaseFirestore.instance
+                          title: "New Orders",
+                          icon: Icons.shopping_cart,
+                          color: Colors.blue,
+                          stream: firestore
                               .collection('orders')
-                              .where('status', isEqualTo: 'Pending')
+                              .where('deliveryStatus', isEqualTo: 'Processing')
                               .snapshots(),
                         ),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
                         child: _buildLiveStatCard(
-                          "Deliveries in Progress",
-                          Icons.local_shipping,
-                          Colors.green,
-                          FirebaseFirestore.instance
-                              .collection('deliveries')
-                              .where('status', isEqualTo: 'In Progress')
+                          title: "Deliveries in Progress",
+                          icon: Icons.local_shipping,
+                          color: Colors.green,
+                          stream: firestore
+                              .collection('orders')
+                              .where('deliveryStatus', isEqualTo: 'Shipped')
                               .snapshots(),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 16),
+
+                  // ROW 2: Low Stock + Completed Today (FIXED!)
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
                         child: _buildLiveStatCard(
-                          "Inventory Low Stock",
-                          Icons.inventory,
-                          Colors.orange,
-                          FirebaseFirestore.instance
+                          title: "Inventory Low Stock",
+                          icon: Icons.inventory,
+                          color: Colors.orange,
+                          stream: firestore
                               .collection('products')
-                              .where('stock', isLessThanOrEqualTo: 5)
+                              .where('stocks', isLessThanOrEqualTo: 5)
                               .snapshots(),
                         ),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
                         child: _buildLiveStatCard(
-                          "Feedback Pending",
-                          Icons.feedback,
-                          Colors.purple,
-                          FirebaseFirestore.instance
-                              .collection('feedbacks')
-                              .where('status', isEqualTo: 'Pending')
+                          title: "Completed Deliveries Today",
+                          icon: Icons.check_circle,
+                          color: Colors.teal,
+                          stream: firestore
+                              .collection('orders')
+                              .where('deliveryStatus', isEqualTo: 'Delivered')
                               .snapshots(),
+                          builderOverride: (snapshot) {
+                            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return '0';
+
+                            final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+                            int count = 0;
+
+                            for (var doc in snapshot.data!.docs) {
+                              final data = doc.data() as Map<String, dynamic>?;
+                              if (data == null) continue;
+
+                              // 100% SAFE ON WEB: Check if field exists first
+                              if (data.containsKey('deliveredAt') && data['deliveredAt'] is Timestamp) {
+                                final date = (data['deliveredAt'] as Timestamp).toDate();
+                                if (date.year == today.year &&
+                                    date.month == today.month &&
+                                    date.day == today.day) {
+                                  count++;
+                                }
+                              }
+                            }
+
+                            return count.toString();
+                          },
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 24),
 
-                  // ✅ Charts row (unchanged)
+                  // Charts (will be upgraded next)
                   Expanded(
                     child: Row(
                       children: [
@@ -395,6 +279,242 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       ),
     );
   }
+
+    Widget _buildOrdersChart() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Orders Trend (Last 7 Days)",
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
+            ),
+            const SizedBox(height: 24),
+            Expanded(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: firestore.collection('orders').snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator(color: Colors.blue));
+                  }
+
+                  final now = DateTime.now();
+                  final last7Days = List.generate(7, (i) => DateTime(now.year, now.month, now.day - (6 - i)));
+
+                  final Map<DateTime, int> dailyCount = {for (var day in last7Days) DateTime(day.year, day.month, day.day): 0};
+
+                  for (var doc in snapshot.data!.docs) {
+                    final data = doc.data() as Map<String, dynamic>?;
+                    if (data?.containsKey('createdAt') != true) continue;
+                    final date = (data!['createdAt'] as Timestamp).toDate();
+                    final key = DateTime(date.year, date.month, date.day);
+                    if (dailyCount.containsKey(key)) dailyCount[key] = dailyCount[key]! + 1;
+                  }
+
+                  final spots = dailyCount.entries.map((e) {
+                    final index = last7Days.indexWhere((d) => d.year == e.key.year && d.month == e.key.month && d.day == e.key.day);
+                    return FlSpot(index.toDouble(), e.value.toDouble());
+                  }).toList();
+
+                  return LineChart(
+                    LineChartData(
+                      gridData: FlGridData(
+                        show: true,
+                        drawVerticalLine: true,
+                        horizontalInterval: 5,
+                        getDrawingHorizontalLine: (_) => const FlLine(color: Colors.black12, strokeWidth: 1),
+                        getDrawingVerticalLine: (_) => const FlLine(color: Colors.black12, strokeWidth: 1),
+                      ),
+                      titlesData: FlTitlesData(
+                        leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 32,
+                            interval: 1,
+                            getTitlesWidget: (value, meta) {
+                              final date = last7Days[value.toInt()];
+                              final isToday = date.day == now.day;
+                              return SideTitleWidget(
+                                axisSide: meta.axisSide,
+                                child: Text(
+                                  '${date.month}/${date.day}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: isToday ? FontWeight.bold : FontWeight.w500,
+                                    color: isToday ? Colors.blue : Colors.black54,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      borderData: FlBorderData(show: false),
+                      minX: 0,
+                      maxX: 6,
+                      minY: 0,
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: spots,
+                          isCurved: true,
+                          barWidth: 5,
+                          color: Colors.blue,
+                          dotData: FlDotData(
+                            show: true,
+                            getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                              radius: 6,
+                              color: Colors.white,
+                              strokeWidth: 3,
+                              strokeColor: Colors.blue,
+                            ),
+                          ),
+                          belowBarData: BarAreaData(
+                            show: true,
+                            gradient: LinearGradient(
+                              colors: [Colors.blue.withOpacity(0.4), Colors.blue.withOpacity(0.0)],
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                            ),
+                          ),
+                        ),
+                      ],
+                      lineTouchData: LineTouchData(
+                        enabled: true,
+                        touchTooltipData: LineTouchTooltipData(
+                          tooltipRoundedRadius: 12,
+                          tooltipPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          tooltipMargin: 12,
+                          getTooltipColor: (_) => Colors.blue.shade700,
+                          getTooltipItems: (touchedSpots) {
+                            return touchedSpots.map((spot) {
+                              final date = last7Days[spot.x.toInt()];
+                              return LineTooltipItem(
+                                '${date.day}/${date.month}\n${spot.y.toInt()} orders',
+                                const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                              );
+                            }).toList();
+                          },
+                        ),
+                      ),
+                    ),
+                    duration: const Duration(milliseconds: 800),
+                    curve: Curves.easeInOutCubic,
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+    Widget _buildDeliveryChart() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Delivery Performance",
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
+            ),
+            const SizedBox(height: 32),
+
+            Expanded(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: firestore.collection('orders').snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator(color: Colors.blue));
+                  }
+
+                  final Map<String, int> count = {
+                    'Processing': 0,
+                    'Shipped': 0,
+                    'Delivered': 0,
+                    'Cancelled': 0,
+                  };
+
+                  for (var doc in snapshot.data!.docs) {
+                    final data = doc.data() as Map<String, dynamic>?;
+                    final status = data?['deliveryStatus'] as String?;
+                    if (status != null && count.containsKey(status)) {
+                      count[status] = count[status]! + 1;
+                    }
+                  }
+
+                  final total = count.values.reduce((a, b) => a + b);
+                  if (total == 0) {
+                    return const Center(
+                      child: Text("No orders yet", style: TextStyle(fontSize: 16, color: Colors.black54)),
+                    );
+                  }
+
+                  final entries = count.entries.where((e) => e.value > 0).toList();
+
+                  return Column(
+                    children: entries.map((entry) {
+                      final percentage = (entry.value / total) * 100;
+                      final color = switch (entry.key) {
+                        'Processing' => Colors.orange.shade600,
+                        'Shipped' => Colors.blue.shade600,
+                        'Delivered' => Colors.green.shade600,
+                        'Cancelled' => Colors.red.shade600,
+                        _ => Colors.grey,
+                      };
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  entry.key,
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  "${entry.value} orders • ${percentage.toStringAsFixed(0)}%",
+                                  style: const TextStyle(fontWeight: FontWeight.w500, color: Colors.black54),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: LinearProgressIndicator(
+                                value: percentage / 100,
+                                backgroundColor: Colors.grey.shade200,
+                                color: color,
+                                minHeight: 28,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _SidebarItem extends StatefulWidget {
@@ -403,8 +523,7 @@ class _SidebarItem extends StatefulWidget {
   final bool active;
   final VoidCallback onTap;
 
-  const _SidebarItem(this.icon, this.title, this.active, this.onTap, {Key? key})
-      : super(key: key);
+  const _SidebarItem(this.icon, this.title, this.active, this.onTap, {Key? key}) : super(key: key);
 
   @override
   State<_SidebarItem> createState() => _SidebarItemState();
@@ -424,9 +543,7 @@ class _SidebarItemState extends State<_SidebarItem> {
         decoration: BoxDecoration(
           color: _hovering
               ? Colors.white.withOpacity(0.15)
-              : (widget.active
-                  ? Colors.white.withOpacity(0.1)
-                  : Colors.transparent),
+              : (widget.active ? Colors.white.withOpacity(0.1) : Colors.transparent),
           borderRadius: BorderRadius.circular(6),
         ),
         child: ListTile(

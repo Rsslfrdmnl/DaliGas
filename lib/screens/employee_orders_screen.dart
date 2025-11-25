@@ -1,6 +1,4 @@
-
-
-// UPDATED SCREEN //
+// UPDATED SCREEN - WITH FULL ORDER DETAILS BUTTON + MEMORY LEAK FIX
 import 'dart:ui' as ui;
 import 'dart:async';
 import 'dart:convert';
@@ -17,10 +15,11 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:collection/collection.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:rxdart/rxdart.dart'; // ← RxDart added
+import 'package:rxdart/rxdart.dart';
 import 'package:daligas/screens/employee_account_screen.dart';
 import 'package:daligas/screens/chat_screen.dart';
-import 'package:flutter/services.dart'; // For SystemNavigator
+import 'package:flutter/services.dart';
+import 'package:daligas/main_mobile.dart';
 
 const String GOOGLE_MAPS_API_KEY = 'AIzaSyAVDDHYb29rt4io-HI0Uq6vfv_GAnlDLlw';
 
@@ -40,11 +39,12 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
   Timer? _locationThrottle;
   StreamSubscription<Position>? _positionStream;
 
-  DateTime? _lastBackPress; // Double back-press
+  DateTime? _lastBackPress;
 
-  // RxDart: Live badge counters
-  late final BehaviorSubject<int> _pendingCountSubject;
-  late final BehaviorSubject<int> _completedCountSubject;
+  // SAFE SUBJECTS + PREVENT DUPLICATE LISTENERS
+  late BehaviorSubject<int> _pendingCountSubject;
+  late BehaviorSubject<int> _completedCountSubject;
+  StreamSubscription<QuerySnapshot>? _orderChangesSubscription;
 
   @override
   void initState() {
@@ -56,18 +56,7 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
     _completedCountSubject = BehaviorSubject<int>.seeded(0);
 
     _initLocation();
-    _listenToOrderChanges(); // Reactive listener
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _tabController.dispose();
-    _locationThrottle?.cancel();
-    _positionStream?.cancel(); // ← ADD THIS
-    _pendingCountSubject.close();
-    _completedCountSubject.close();
-    super.dispose();
+    _listenToOrderChanges();
   }
 
   @override
@@ -77,18 +66,22 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
     }
   }
 
-  // Reactive order count updates
+  // PERMANENTLY FIXED — NO DUPLICATES, NO LEAKS
   void _listenToOrderChanges() {
     if (_employee == null) return;
 
-    FirebaseFirestore.instance
+    _orderChangesSubscription?.cancel();
+
+    _orderChangesSubscription = firestore
         .collection('orders')
         .where('employeeId', isEqualTo: _employee!.uid)
         .orderBy('createdAt', descending: true)
         .snapshots()
         .listen((snapshot) {
+      if (_pendingCountSubject.isClosed || _completedCountSubject.isClosed) return;
+
       final orders = snapshot.docs.map((doc) {
-        final data = doc.data();
+        final data = doc.data() as Map<String, dynamic>;
         data['id'] = doc.id;
         return data;
       }).toList();
@@ -102,62 +95,52 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
   }
 
   Future<void> _initLocation() async {
-  bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-  if (!serviceEnabled) {
-    _showLocationServiceDialog();
-    return;
-  }
-
-  LocationPermission permission = await Geolocator.checkPermission();
-  if (permission == LocationPermission.denied) {
-    permission = await Geolocator.requestPermission();
-    if (permission == LocationPermission.denied) {
-      _showPermissionDeniedDialog();
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      _showLocationServiceDialog();
       return;
     }
-  }
 
-  if (permission == LocationPermission.deniedForever) {
-    _showPermissionPermanentlyDeniedDialog();
-    return;
-  }
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        _showPermissionDeniedDialog();
+        return;
+      }
+    }
 
-  try {
-    // Cancel any existing stream
-    await _positionStream?.cancel();
-    _positionStream = null;
+    if (permission == LocationPermission.deniedForever) {
+      _showPermissionPermanentlyDeniedDialog();
+      return;
+    }
 
-    Position position = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
+    try {
+      await _positionStream?.cancel();
+      _positionStream = null;
 
-    if (!mounted) return;
-    setState(() => _currentPosition = position);
-
-    // Start new stream
-    _positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 50,
-      ),
-    ).listen((pos) {
+      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       if (!mounted) return;
-      if (_locationThrottle?.isActive ?? false) return;
+      setState(() => _currentPosition = position);
 
-      _locationThrottle = Timer(const Duration(seconds: 30), () {});
+      _positionStream = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 50),
+      ).listen((pos) {
+        if (!mounted || (_locationThrottle?.isActive ?? false)) return;
+        _locationThrottle = Timer(const Duration(seconds: 30), () {});
 
-      setState(() => _currentPosition = pos);
-      _updateDriverLocation(pos);
-    });
-  } catch (e) {
-    debugPrint('Location init failed: $e');
+        setState(() => _currentPosition = pos);
+        _updateDriverLocation(pos);
+      });
+    } catch (e) {
+      debugPrint('Location init failed: $e');
+    }
   }
-}
 
   void _updateDriverLocation(Position position) {
     if (_employee == null) return;
 
-    FirebaseFirestore.instance
+    firestore
         .collection('orders')
         .where('employeeId', isEqualTo: _employee!.uid)
         .where('deliveryStatus', isEqualTo: 'Shipped')
@@ -170,9 +153,23 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
             'lng': position.longitude,
             'updatedAt': FieldValue.serverTimestamp(),
           },
-        }).catchError((e) => debugPrint('Update failed: $e'));
+        });
       }
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _tabController.dispose();
+    _locationThrottle?.cancel();
+    _positionStream?.cancel();
+
+    _orderChangesSubscription?.cancel();
+    _pendingCountSubject.close();
+    _completedCountSubject.close();
+
+    super.dispose();
   }
 
   Color _statusColor(String status) {
@@ -212,32 +209,18 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
             size: 28,
           ),
         ),
-        title: Text(
-          'Order #$orderId',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-        ),
+        title: Text('Order #$orderId', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 4),
-            Text(
-              '$product $weight × $qty',
-              style: const TextStyle(fontSize: 13, color: Colors.black87),
-            ),
+            Text('$product $weight × $qty', style: const TextStyle(fontSize: 13, color: Colors.black87)),
             const SizedBox(height: 2),
-            Text(
-              address,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-            ),
+            Text(address, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.grey)),
             const SizedBox(height: 4),
             Row(
               children: [
-                Text(
-                  '₱${total.toStringAsFixed(2)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
-                ),
+                Text('₱${total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -246,10 +229,7 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: _statusColor(status)),
                   ),
-                  child: Text(
-                    status,
-                    style: TextStyle(color: _statusColor(status), fontWeight: FontWeight.bold, fontSize: 10),
-                  ),
+                  child: Text(status, style: TextStyle(color: _statusColor(status), fontWeight: FontWeight.bold, fontSize: 10)),
                 ),
               ],
             ),
@@ -276,30 +256,143 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (_) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: _OrderActionsSheet(
-          orderId: orderId,
-          status: status,
-          items: items,
-          userId: userId,
-          deliveryAddress: address,
-          onStatusChanged: () => setState(() {}),
-          currentPosition: _currentPosition,
-          orderData: order,
+child: _OrderActionsSheet(
+  orderId: orderId,
+  status: status,
+  items: items,
+  userId: userId,
+  deliveryAddress: address,
+  onStatusChanged: () => setState(() {}),
+  currentPosition: _currentPosition,
+  orderData: order,
+  onShowDetails: () => _showOrderDetails(order), // ← Pass the function
+),
+      ),
+    );
+  }
+
+  // NEW: Full Order Details Bottom Sheet
+  void _showOrderDetails(Map<String, dynamic> order) {
+    final String orderId = order['id'];
+    final double total = (order['total'] ?? 0).toDouble();
+    final String paymentMethod = order['paymentMethod'] ?? 'Unknown';
+    final String paymentStatus = order['paymentStatus'] ?? 'Pending';
+    final String deliveryAddress = order['deliveryAddress'] ?? 'Not provided';
+    final Timestamp? createdAt = order['createdAt'] as Timestamp?;
+    final List items = order['items'] ?? [];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.9,
+        maxChildSize: 0.95,
+        minChildSize: 0.6,
+        builder: (_, controller) => Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(width: 50, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))),
+              ),
+              const SizedBox(height: 16),
+              Text('Order Details', style: Theme.of(context).textTheme.titleLarge!.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text('Order #$orderId', style: const TextStyle(fontSize: 16, color: Colors.grey)),
+              const Divider(height: 32),
+              const Text('Items Ordered', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView.builder(
+                  controller: controller,
+                  itemCount: items.length,
+                  itemBuilder: (context, i) {
+                    final item = items[i];
+                    final String name = item['name'] ?? 'Unknown';
+                    final String weight = item['weight']?.toString() ?? '';
+                    final double price = (item['price'] ?? 0).toDouble();
+                    final int qty = item['quantity'] ?? 1;
+                    final double subtotal = price * qty;
+
+                    return Card(
+                      margin: const EdgeInsets.symmetric(vertical: 6),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  Text('$weight × $qty', style: const TextStyle(color: Colors.grey)),
+                                ],
+                              ),
+                            ),
+                            Text('₱${subtotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const Divider(height: 32),
+              _buildDetailRow('Total Amount', '₱${total.toStringAsFixed(2)}', isBold: true),
+              _buildDetailRow('Payment Method', paymentMethod),
+              _buildDetailRow('Payment Status', paymentStatus, color: paymentStatus == 'Paid' ? Colors.green : Colors.orange),
+              _buildDetailRow('Delivery Address', deliveryAddress),
+              if (createdAt != null) _buildDetailRow('Order Date', _formatTimestamp(createdAt)),
+            ],
+          ),
         ),
       ),
     );
   }
 
+  Widget _buildDetailRow(String label, String value, {bool isBold = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 140, child: Text(label, style: const TextStyle(color: Colors.grey))),
+          Expanded(child: Text(value, style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, color: color ?? Colors.black))),
+        ],
+      ),
+    );
+  }
+
+String _formatTimestamp(Timestamp timestamp) {
+  final date = timestamp.toDate();
+  final monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  final month = monthNames[date.month - 1];
+  final day = date.day;
+  final year = date.year;
+
+  final hour = date.hour > 12 ? date.hour - 12 : (date.hour == 0 ? 12 : date.hour);
+  final minute = date.minute.toString().padLeft(2, '0');
+  final period = date.hour >= 12 ? 'PM' : 'AM';
+
+  return '$month $day, $year ${hour}:${minute}$period';
+}
+
   Widget _empty(String msg) => Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.inbox, size: 60, color: Colors.white54),
+            const Icon(Icons.inbox, size: 60, color: Colors.white54),
             const SizedBox(height: 16),
             Text(msg, style: const TextStyle(color: Colors.white70, fontSize: 16), textAlign: TextAlign.center),
           ],
@@ -334,7 +427,6 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
 
   void _showLocationServiceDialog() {
     if (ModalRoute.of(context)?.isCurrent != true) return;
-
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -342,13 +434,7 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
         title: const Text("Location Disabled"),
         content: const Text("Please enable location services to track deliveries."),
         actions: [
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await Geolocator.openLocationSettings();
-            },
-            child: const Text("Open Settings"),
-          ),
+          TextButton(onPressed: () async { Navigator.pop(context); await Geolocator.openLocationSettings(); }, child: const Text("Open Settings")),
         ],
       ),
     );
@@ -374,32 +460,20 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
       builder: (_) => AlertDialog(
         title: const Text("Permission Denied"),
         content: const Text("Please enable location in Settings > Apps > DaliGas > Permissions."),
-        actions: [
-          TextButton(onPressed: openAppSettings, child: const Text("Open Settings")),
-        ],
+        actions: [TextButton(onPressed: openAppSettings, child: const Text("Open Settings"))],
       ),
     );
   }
 
-  // Double back-press to exit
   Future<bool> _onWillPop() async {
     final now = DateTime.now();
     if (_lastBackPress == null || now.difference(_lastBackPress!) > const Duration(seconds: 2)) {
       _lastBackPress = now;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Press back again to exit'),
-          duration: Duration(seconds: 2),
-          backgroundColor: Colors.black87,
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Press back again to exit'), duration: Duration(seconds: 2), backgroundColor: Colors.black87));
       return false;
     }
-    if (Platform.isAndroid) {
-      SystemNavigator.pop();
-    } else {
-      exit(0);
-    }
+    if (Platform.isAndroid) SystemNavigator.pop();
+    else exit(0);
     return true;
   }
 
@@ -419,7 +493,7 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
         ),
         body: StreamBuilder<QuerySnapshot>(
           stream: _employee != null
-              ? FirebaseFirestore.instance
+              ? firestore
                   .collection('orders')
                   .where('employeeId', isEqualTo: _employee!.uid)
                   .orderBy('createdAt', descending: true)
@@ -459,7 +533,6 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
                     indicator: BoxDecoration(color: const Color(0xFFe6eef7), borderRadius: BorderRadius.circular(12)),
                     indicatorSize: TabBarIndicatorSize.tab,
                     tabs: [
-                      // Pending Tab with Live Badge
                       Tab(
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -473,21 +546,14 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
                                 if (count == 0) return const SizedBox();
                                 return Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    '$count',
-                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                  ),
+                                  decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(12)),
+                                  child: Text('$count', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                                 );
                               },
                             ),
                           ],
                         ),
                       ),
-                      // Completed Tab with Live Badge
                       Tab(
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -501,14 +567,8 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
                                 if (count == 0) return const SizedBox();
                                 return Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.green,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    '$count',
-                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                  ),
+                                  decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(12)),
+                                  child: Text('$count', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                                 );
                               },
                             ),
@@ -537,9 +597,7 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
   }
 }
 
-// ================================================================
 // BOTTOM-SHEET: WAZE-STYLE + NAVIGATION BUTTON
-// ================================================================
 class _OrderActionsSheet extends StatefulWidget {
   final String orderId;
   final String status;
@@ -549,6 +607,7 @@ class _OrderActionsSheet extends StatefulWidget {
   final VoidCallback onStatusChanged;
   final Position? currentPosition;
   final Map<String, dynamic> orderData;
+  final VoidCallback onShowDetails;
 
   const _OrderActionsSheet({
     required this.orderId,
@@ -559,6 +618,7 @@ class _OrderActionsSheet extends StatefulWidget {
     required this.onStatusChanged,
     this.currentPosition,
     required this.orderData,
+    required this.onShowDetails,
   });
 
   @override
@@ -574,6 +634,7 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
   bool _isGeocoding = false;
   bool _isIconLoaded = false;
   bool _isRouteLoading = false;
+  bool _isConfirmingOrder = false;
   bool isConfirmingDelivery = false;
   Set<Polyline> _polylines = {};
   Set<Marker> _markers = {};
@@ -590,22 +651,141 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
     _loadCustomerLocation();
   }
 
+Widget _buildFullOrderDetailsSheet({
+  required Map<String, dynamic> orderData,
+  required ScrollController scrollController,
+}) {
+  final String orderId = orderData['id'] ?? 'Unknown';
+  final double total = (orderData['total'] ?? 0).toDouble();
+  final String paymentMethod = orderData['paymentMethod'] ?? 'Unknown';
+  final String paymentStatus = orderData['paymentStatus'] ?? 'Pending';
+  final String deliveryAddress = orderData['deliveryAddress'] ?? 'Not provided';
+  final Timestamp? createdAt = orderData['createdAt'] as Timestamp?;
+  final List items = orderData['items'] ?? [];
+
+  return Padding(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Drag handle
+        Center(
+          child: Container(
+            width: 50,
+            height: 5,
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text('Order Details', style: Theme.of(context).textTheme.titleLarge!.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Text('Order #$orderId', style: const TextStyle(fontSize: 16, color: Colors.grey)),
+        const Divider(height: 32),
+
+        const Text('Items Ordered', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        const SizedBox(height: 12),
+
+        Expanded(
+          child: ListView.builder(
+            controller: scrollController,
+            itemCount: items.length,
+            itemBuilder: (context, i) {
+              final item = items[i];
+              final String name = item['name'] ?? 'Unknown';
+              final String weight = item['weight']?.toString() ?? '';
+              final double price = (item['price'] ?? 0).toDouble();
+              final int qty = item['quantity'] ?? 1;
+              final double subtotal = price * qty;
+
+              return Card(
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            Text('$weight × $qty', style: const TextStyle(color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                      Text('₱${subtotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+
+        const Divider(height: 32),
+        _buildDetailRow('Total Amount', '₱${total.toStringAsFixed(2)}', isBold: true),
+        _buildDetailRow('Payment Method', paymentMethod),
+        _buildDetailRow('Payment Status', paymentStatus,
+            color: paymentStatus == 'Paid' ? Colors.green : Colors.orange),
+        _buildDetailRow('Delivery Address', deliveryAddress),
+        if (createdAt != null)
+          _buildDetailRow('Order Date', _formatTimestamp(createdAt)),
+        const SizedBox(height: 20),
+      ],
+    ),
+  );
+}
+
+// Reuse your existing helper methods
+Widget _buildDetailRow(String label, String value, {bool isBold = false, Color? color}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(width: 140, child: Text(label, style: const TextStyle(color: Colors.grey))),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              color: color ?? Colors.black,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+String _formatTimestamp(Timestamp timestamp) {
+  final date = timestamp.toDate();
+  final monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  final month = monthNames[date.month - 1];
+  final day = date.day;
+  final year = date.year;
+  final hour = date.hour > 12 ? date.hour - 12 : (date.hour == 0 ? 12 : date.hour);
+  final minute = date.minute.toString().padLeft(2, '0');
+  final period = date.hour >= 12 ? 'PM' : 'AM';
+  return '$month $day, $year ${hour}:${minute}$period';
+}
+
   Future<void> _loadDriverIconFromFirebase() async {
     if (_cachedTruckIcon != null) {
       setState(() => _isIconLoaded = true);
       return;
     }
-
     try {
       final ref = FirebaseStorage.instance.ref().child('icons/truck.png');
       final url = await ref.getDownloadURL();
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
-        final codec = await ui.instantiateImageCodec(
-          response.bodyBytes,
-          targetWidth: 150,
-          targetHeight: 150,
-        );
+        final codec = await ui.instantiateImageCodec(response.bodyBytes, targetWidth: 150, targetHeight: 150);
         final frame = await codec.getNextFrame();
         final byteData = await frame.image.toByteData(format: ui.ImageByteFormat.png);
         final bitmap = BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
@@ -618,12 +798,12 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
   }
 
   void _fetchCustomerPhone() async {
-    final doc = await FirebaseFirestore.instance.collection('users').doc(widget.userId).get();
+    final doc = await firestore.collection('users').doc(widget.userId).get();
     if (doc.exists) setState(() => _customerPhone = doc['phone'] as String?);
   }
 
   void _listenToDriverLocation() {
-    FirebaseFirestore.instance.collection('orders').doc(widget.orderId).snapshots().listen((doc) {
+    firestore.collection('orders').doc(widget.orderId).snapshots().listen((doc) {
       if (!doc.exists) return;
       final data = doc.data()!;
       final lat = data['driverLocation']?['lat'];
@@ -631,7 +811,6 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
       if (lat == null || lng == null) return;
 
       final newLoc = LatLng(lat as double, lng as double);
-
       setState(() {
         _previousLocation = _driverLocation;
         _driverLocation = newLoc;
@@ -639,12 +818,9 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
       });
 
       if (_customerLocation.latitude != 14.5995 &&
-          (_previousLocation == null ||
-              _previousLocation!.latitude != newLoc.latitude ||
-              _previousLocation!.longitude != newLoc.longitude)) {
+          (_previousLocation == null || _previousLocation!.latitude != newLoc.latitude || _previousLocation!.longitude != newLoc.longitude)) {
         _fetchRoute();
       }
-
       _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
     });
   }
@@ -661,11 +837,7 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
     }
 
     _markers = {
-      Marker(
-        markerId: const MarkerId('customer'),
-        position: _customerLocation,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-      ),
+      Marker(markerId: const MarkerId('customer'), position: _customerLocation, icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)),
       if (_isIconLoaded && _cachedTruckIcon != null)
         Marker(
           markerId: const MarkerId('driver'),
@@ -702,10 +874,7 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
           _updateMarkers();
         });
 
-        await FirebaseFirestore.instance
-            .collection('orders')
-            .doc(widget.orderId)
-            .update({
+        await firestore.collection('orders').doc(widget.orderId).update({
           'customerLatLng': {'lat': loc.latitude, 'lng': loc.longitude}
         });
 
@@ -728,11 +897,7 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
     final destination = '${_customerLocation.latitude},${_customerLocation.longitude}';
 
     final url = Uri.parse(
-      'https://maps.googleapis.com/maps/api/directions/json'
-      '?origin=$origin'
-      '&destination=$destination'
-      '&mode=driving'
-      '&key=$GOOGLE_MAPS_API_KEY'
+      'https://maps.googleapis.com/maps/api/directions/json?origin=$origin&destination=$destination&mode=driving&key=$GOOGLE_MAPS_API_KEY',
     );
 
     try {
@@ -750,15 +915,9 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
 
           setState(() {
             _polylines = {
-              Polyline(
-                polylineId: const PolylineId('route'),
-                points: points,
-                color: Colors.blue,
-                width: 5,
-              ),
+              Polyline(polylineId: const PolylineId('route'), points: points, color: Colors.blue, width: 5),
             };
           });
-
           _fitRouteOnMap(points);
         }
       }
@@ -782,11 +941,7 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
       if (p.longitude > maxLng) maxLng = p.longitude;
     }
 
-    final bounds = LatLngBounds(
-      southwest: LatLng(minLat, minLng),
-      northeast: LatLng(maxLat, maxLng),
-    );
-
+    final bounds = LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng));
     _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
   }
 
@@ -826,26 +981,16 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
 
     if (!hasSeenTip && mounted) {
       await prefs.setBool('nav_tip_shown', true);
-
       final confirmed = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (_) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('Navigation Tip', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: const Text(
-            'We\'ll open Waze first (best for PH traffic).\n\n'
-            'If Waze is not installed, Google Maps will open automatically.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Got it!', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ],
+          content: const Text('We\'ll open Waze first (best for PH traffic).\n\nIf Waze is not installed, Google Maps will open automatically.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Got it!', style: TextStyle(fontWeight: FontWeight.bold)))],
         ),
       );
-
       if (confirmed != true) return;
     }
 
@@ -856,92 +1001,102 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
 
     final wazeUri = Uri.parse('waze://?ll=$destLat,$destLng&navigate=yes');
     final googleUri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1'
-      '&origin=$originLat,$originLng'
-      '&destination=$destLat,$destLng'
-      '&travelmode=driving'
-      '&dir_action=navigate',
+      'https://www.google.com/maps/dir/?api=1&origin=$originLat,$originLng&destination=$destLat,$destLng&travelmode=driving&dir_action=navigate',
     );
 
     bool opened = false;
-
-    try {
-      opened = await launchUrl(wazeUri, mode: LaunchMode.externalApplication);
-    } catch (_) {}
-
+    try { opened = await launchUrl(wazeUri, mode: LaunchMode.externalApplication); } catch (_) {}
     if (!opened) {
       try {
         await launchUrl(googleUri, mode: LaunchMode.externalApplication);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Waze not found. Opening Google Maps...'),
-              backgroundColor: Colors.blue,
-              duration: Duration(seconds: 2),
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Waze not found. Opening Google Maps...'), backgroundColor: Colors.blue, duration: Duration(seconds: 2)));
         }
       } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Opening in browser...')),
-          );
-        }
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening in browser...')));
       }
     }
   }
 
-  void _showError(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red),
-    );
-  }
-
-  String _shortOrderId(String fullId) {
-    if (fullId.length <= 5) return fullId;
-    return fullId.substring(fullId.length - 5);
-  }
+  String _shortOrderId(String fullId) => fullId.length <= 5 ? fullId : fullId.substring(fullId.length - 5);
 
   Future<void> _confirmOrder() async {
+    if (_isConfirmingOrder) return;
+    setState(() => _isConfirmingOrder = true);
+
     try {
-      final orderRef = FirebaseFirestore.instance.collection('orders').doc(widget.orderId);
+      final orderRef = firestore.collection('orders').doc(widget.orderId);
       await orderRef.update({
         'deliveryStatus': 'Shipped',
         'driverLocation': {
           'lat': widget.currentPosition?.latitude ?? 14.5995,
           'lng': widget.currentPosition?.longitude ?? 120.9842,
         },
+        'shippedAt': FieldValue.serverTimestamp(),
       });
+
       await _notifyCustomer('Out for delivery', 'Your order #${widget.orderId} is on its way!');
       widget.onStatusChanged();
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to confirm: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to confirm order: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isConfirmingOrder = false);
     }
   }
 
   Future<void> _confirmDelivery() async {
-  if (isConfirmingDelivery) return; // Prevent double tap
+  if (isConfirmingDelivery) return;
   setState(() => isConfirmingDelivery = true);
 
   try {
-    final orderRef = FirebaseFirestore.instance.collection('orders').doc(widget.orderId);
-    await orderRef.update({'deliveryStatus': 'Delivered'});
-    await _notifyCustomer('Delivered', 'Order #${widget.orderId} has been delivered.');
+    final orderRef = firestore.collection('orders').doc(widget.orderId);
+
+    // Use a transaction to safely check current paymentStatus and update only if needed
+    await firestore.runTransaction((transaction) async {
+      final snapshot = await transaction.get(orderRef);
+      if (!snapshot.exists) throw Exception("Order not found");
+
+      final currentPaymentStatus = snapshot.get('paymentStatus') as String? ?? 'Pending';
+
+      // Build the update map
+      final updateData = <String, dynamic>{
+        'deliveryStatus': 'Delivered',
+        'deliveredAt': FieldValue.serverTimestamp(),
+      };
+
+      // Only set paymentStatus to "Paid" if it's not already Paid
+      if (currentPaymentStatus != 'Paid') {
+        updateData['paymentStatus'] = 'Paid';
+        updateData['paidAt'] = FieldValue.serverTimestamp(); // optional: track when it was marked paid
+      }
+
+      transaction.update(orderRef, updateData);
+    });
+
+    // Notify customer
+    await _notifyCustomer('Order Delivered!', 'Your order #${widget.orderId} has been successfully delivered and payment is confirmed.');
+
     widget.onStatusChanged();
     if (mounted) Navigator.pop(context);
   } catch (e) {
-    _showError('Failed to confirm: $e');
-  } finally {
+    debugPrint('Confirm delivery failed: $e');
     if (mounted) {
-      setState(() => isConfirmingDelivery = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to confirm delivery: $e'), backgroundColor: Colors.red),
+      );
     }
+  } finally {
+    if (mounted) setState(() => isConfirmingDelivery = false);
   }
 }
 
   Future<void> _notifyCustomer(String title, String body) async {
-    await FirebaseFirestore.instance.collection('users').doc(widget.userId).collection('inAppNotifications').add({
+    await firestore.collection('users').doc(widget.userId).collection('inAppNotifications').add({
       'title': title,
       'body': body,
       'type': 'order',
@@ -957,9 +1112,7 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
       return;
     }
     final uri = Uri(scheme: 'tel', path: _customerPhone);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   void _showFullMap() {
@@ -967,16 +1120,13 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Customer address still loading...')));
       return;
     }
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => FullScreenMapScreen(
-          orderId: widget.orderId,
-          customerLocation: _customerLocation,
-          driverLocation: _driverLocation,
-        ),
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => FullScreenMapScreen(
+        orderId: widget.orderId,
+        customerLocation: _customerLocation,
+        driverLocation: _driverLocation,
       ),
-    );
+    ));
   }
 
   void _showContactOptions() {
@@ -987,28 +1137,14 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.phone, color: Color(0xFF052238)),
-              title: const Text('Call Customer'),
-              onTap: () { Navigator.pop(context); _callCustomer(); },
-            ),
+            ListTile(leading: const Icon(Icons.phone, color: Color(0xFF052238)), title: const Text('Call Customer'), onTap: () { Navigator.pop(context); _callCustomer(); }),
             ListTile(
               leading: const Icon(Icons.chat, color: Color(0xFF052238)),
               title: const Text('Chat with Customer'),
               onTap: () {
                 Navigator.pop(context);
-                final chatId = _generateChatId();
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ChatScreen(
-                      title: 'Customer • Order #${_shortOrderId(widget.orderId)}',
-                      chatId: chatId,
-                      isEmployee: true,
-                      orderId: widget.orderId,
-                    ),
-                  ),
-                );
+                final chatId = '${widget.orderData['userId']}_${FirebaseAuth.instance.currentUser!.uid}_${widget.orderId}';
+                Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(title: 'Customer • Order #${_shortOrderId(widget.orderId)}', chatId: chatId, isEmployee: true, orderId: widget.orderId)));
               },
             ),
             const SizedBox(height: 10),
@@ -1016,12 +1152,6 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
         ),
       ),
     );
-  }
-
-  String _generateChatId() {
-    final employeeId = FirebaseAuth.instance.currentUser!.uid;
-    final customerId = widget.orderData['userId'] as String;
-    return '${customerId}_${employeeId}_${widget.orderId}';
   }
 
   @override
@@ -1076,14 +1206,11 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
                       onMapCreated: (c) {
                         _mapController = c;
                         Future.delayed(const Duration(milliseconds: 500), () {
-                          if (_driverLocation.latitude != 14.5995 && _customerLocation.latitude != 14.5995) {
-                            _fetchRoute();
-                          }
+                          if (_driverLocation.latitude != 14.5995 && _customerLocation.latitude != 14.5995) _fetchRoute();
                         });
                       },
                     ),
-                    if (_isRouteLoading)
-                      const Center(child: CircularProgressIndicator(color: Colors.white)),
+                    if (_isRouteLoading) const Center(child: CircularProgressIndicator(color: Colors.white)),
                     if (_routeInfo.isNotEmpty)
                       Positioned(
                         top: 8,
@@ -1115,33 +1242,57 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
               if (canConfirmOrder)
                 Expanded(
                   child: ElevatedButton.icon(
-                    icon: const Icon(Icons.check, size: 20),
-                    label: const Text('Confirm Order'),
+                    icon: _isConfirmingOrder
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.check, size: 20),
+                    label: Text(_isConfirmingOrder ? 'Confirming...' : 'Confirm Order'),
                     style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF052238), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), padding: const EdgeInsets.symmetric(vertical: 14)),
-                    onPressed: _confirmOrder,
+                    onPressed: _isConfirmingOrder ? null : _confirmOrder,
                   ),
                 ),
-              if (canConfirmDelivery) const SizedBox(width: 12),
+
+              if (canConfirmOrder || canConfirmDelivery) const SizedBox(width: 8),
+              Expanded(
+  child: ElevatedButton.icon(
+    icon: const Icon(Icons.receipt_long, size: 20),
+    label: const Text('See Details'),
+    style: ElevatedButton.styleFrom(
+      backgroundColor: Colors.deepPurple,
+      foregroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      padding: const EdgeInsets.symmetric(vertical: 14),
+    ),
+    onPressed: () {
+      // DO NOT pop the current sheet! Just open a new one on top
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (context) => DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.9,
+          maxChildSize: 0.95,
+          minChildSize: 0.6,
+          builder: (_, controller) => _buildFullOrderDetailsSheet(
+            orderData: widget.orderData,
+            scrollController: controller,
+          ),
+        ),
+      );
+    },
+  ),
+),
+
+              if (canConfirmDelivery) const SizedBox(width: 8),
               if (canConfirmDelivery)
                 Expanded(
                   child: ElevatedButton.icon(
-                    icon: isConfirmingDelivery
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Icon(Icons.check_circle, size: 20),
+                    icon: isConfirmingDelivery ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.check_circle, size: 20),
                     label: Text(isConfirmingDelivery ? 'Confirming...' : 'Confirm Delivery'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), padding: const EdgeInsets.symmetric(vertical: 14)),
                     onPressed: isConfirmingDelivery ? null : _confirmDelivery,
                   ),
                 ),
@@ -1152,15 +1303,8 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
             width: double.infinity,
             child: OutlinedButton.icon(
               icon: const Icon(Icons.contact_phone, color: Color(0xFF052238)),
-              label: Text(
-                _customerPhone != null ? 'Contact Customer ($_customerPhone)' : 'Loading...',
-                style: const TextStyle(color: Color(0xFF052238)),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFF052238), width: 1.5),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
+              label: Text(_customerPhone != null ? 'Contact Customer ($_customerPhone)' : 'Loading...', style: const TextStyle(color: Color(0xFF052238))),
+              style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFF052238), width: 1.5), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), padding: const EdgeInsets.symmetric(vertical: 14)),
               onPressed: _customerPhone != null ? _showContactOptions : null,
             ),
           ),
@@ -1171,20 +1315,13 @@ class _OrderActionsSheetState extends State<_OrderActionsSheet> {
   }
 }
 
-// ================================================================
-// FULL-SCREEN MAP: WAZE-STYLE + BIG FAB
-// ================================================================
+// FULL-SCREEN MAP
 class FullScreenMapScreen extends StatefulWidget {
   final String orderId;
   final LatLng customerLocation;
   final LatLng driverLocation;
 
-  const FullScreenMapScreen({
-    super.key,
-    required this.orderId,
-    required this.customerLocation,
-    required this.driverLocation,
-  });
+  const FullScreenMapScreen({super.key, required this.orderId, required this.customerLocation, required this.driverLocation});
 
   @override
   State<FullScreenMapScreen> createState() => _FullScreenMapScreenState();
@@ -1192,7 +1329,7 @@ class FullScreenMapScreen extends StatefulWidget {
 
 class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   GoogleMapController? _mapController;
-  LatLng _driverLocation;
+  late LatLng _driverLocation;
   LatLng? _previousLocation;
   bool _isIconLoaded = false;
   bool _isRouteLoading = false;
@@ -1201,8 +1338,6 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   String _routeInfo = '';
   static BitmapDescriptor? _cachedTruckIcon;
 
-  _FullScreenMapScreenState() : _driverLocation = const LatLng(14.5995, 120.9842);
-
   @override
   void initState() {
     super.initState();
@@ -1210,48 +1345,32 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
     _previousLocation = widget.driverLocation;
     _loadDriverIconFromFirebase();
     _listenToDriverLocation();
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_driverLocation.latitude != 14.5995 && widget.customerLocation.latitude != 14.5995) {
-        _fetchRoute();
-      }
+      if (_driverLocation.latitude != 14.5995 && widget.customerLocation.latitude != 14.5995) _fetchRoute();
     });
   }
 
   Future<void> _loadDriverIconFromFirebase() async {
-    if (_cachedTruckIcon != null) {
-      setState(() => _isIconLoaded = true);
-      return;
-    }
-
+    if (_cachedTruckIcon != null) { setState(() => _isIconLoaded = true); return; }
     try {
       final ref = FirebaseStorage.instance.ref().child('icons/truck.png');
       final url = await ref.getDownloadURL();
       final response = await http.get(Uri.parse(url));
-      if (response.statusCode != 200) return;
-
-      final codec = await ui.instantiateImageCodec(
-        response.bodyBytes,
-        targetWidth: 150,
-        targetHeight: 150,
-      );
-      final frame = await codec.getNextFrame();
-      final byteData = await frame.image.toByteData(format: ui.ImageByteFormat.png);
-      final bitmap = BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
-      _cachedTruckIcon = bitmap;
-
-      if (mounted) setState(() => _isIconLoaded = true);
+      if (response.statusCode == 200) {
+        final codec = await ui.instantiateImageCodec(response.bodyBytes, targetWidth: 150, targetHeight: 150);
+        final frame = await codec.getNextFrame();
+        final byteData = await frame.image.toByteData(format: ui.ImageByteFormat.png);
+        final bitmap = BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+        _cachedTruckIcon = bitmap;
+        if (mounted) setState(() => _isIconLoaded = true);
+      }
     } catch (e) {
       debugPrint('Truck icon load failed: $e');
     }
   }
 
   void _listenToDriverLocation() {
-    FirebaseFirestore.instance
-        .collection('orders')
-        .doc(widget.orderId)
-        .snapshots()
-        .listen((doc) {
+    firestore.collection('orders').doc(widget.orderId).snapshots().listen((doc) {
       if (!doc.exists) return;
       final data = doc.data()!;
       final lat = data['driverLocation']?['lat'];
@@ -1272,46 +1391,22 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   void _updateMarkers() {
     double rotation = 0;
     if (_previousLocation != null) {
-      rotation = Geolocator.bearingBetween(
-        _previousLocation!.latitude,
-        _previousLocation!.longitude,
-        _driverLocation.latitude,
-        _driverLocation.longitude,
-      );
+      rotation = Geolocator.bearingBetween(_previousLocation!.latitude, _previousLocation!.longitude, _driverLocation.latitude, _driverLocation.longitude);
     }
-
     _markers = {
-      Marker(
-        markerId: const MarkerId('customer'),
-        position: widget.customerLocation,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-      ),
+      Marker(markerId: const MarkerId('customer'), position: widget.customerLocation, icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)),
       if (_isIconLoaded && _cachedTruckIcon != null)
-        Marker(
-          markerId: const MarkerId('driver'),
-          position: _driverLocation,
-          icon: _cachedTruckIcon!,
-          anchor: const Offset(0.5, 0.5),
-          rotation: rotation,
-          zIndex: 10,
-        ),
+        Marker(markerId: const MarkerId('driver'), position: _driverLocation, icon: _cachedTruckIcon!, anchor: const Offset(0.5, 0.5), rotation: rotation, zIndex: 10),
     };
   }
 
   Future<void> _fetchRoute() async {
     if (_driverLocation.latitude == 14.5995 || widget.customerLocation.latitude == 14.5995 || _isRouteLoading) return;
-
     setState(() => _isRouteLoading = true);
 
     final origin = '${_driverLocation.latitude},${_driverLocation.longitude}';
     final destination = '${widget.customerLocation.latitude},${widget.customerLocation.longitude}';
-    final url = Uri.parse(
-      'https://maps.googleapis.com/maps/api/directions/json'
-      '?origin=$origin'
-      '&destination=$destination'
-      '&mode=driving'
-      '&key=$GOOGLE_MAPS_API_KEY'
-    );
+    final url = Uri.parse('https://maps.googleapis.com/maps/api/directions/json?origin=$origin&destination=$destination&mode=driving&key=$GOOGLE_MAPS_API_KEY');
 
     try {
       final response = await http.get(url).timeout(const Duration(seconds: 10));
@@ -1325,16 +1420,8 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
           _routeInfo = '$duration • $distance';
 
           setState(() {
-            _polylines = {
-              Polyline(
-                polylineId: const PolylineId('route'),
-                points: points,
-                color: Colors.blue,
-                width: 5,
-              ),
-            };
+            _polylines = {Polyline(polylineId: const PolylineId('route'), points: points, color: Colors.blue, width: 5)};
           });
-
           _fitRouteOnMap(points);
         }
       }
@@ -1347,17 +1434,14 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
 
   void _fitRouteOnMap(List<LatLng> points) {
     if (points.isEmpty || _mapController == null) return;
-
     double minLat = points[0].latitude, maxLat = points[0].latitude;
     double minLng = points[0].longitude, maxLng = points[0].longitude;
-
     for (var p in points) {
       if (p.latitude < minLat) minLat = p.latitude;
       if (p.latitude > maxLat) maxLat = p.latitude;
       if (p.longitude < minLng) minLng = p.longitude;
       if (p.longitude > maxLng) maxLng = p.longitude;
     }
-
     final bounds = LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng));
     _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
   }
@@ -1366,27 +1450,15 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
     List<LatLng> points = [];
     int index = 0, len = encoded.length;
     int lat = 0, lng = 0;
-
     while (index < len) {
       int b, shift = 0, result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
+      do { b = encoded.codeUnitAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
       int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
       lat += dlat;
-
-      shift = 0;
-      result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
+      shift = 0; result = 0;
+      do { b = encoded.codeUnitAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
       int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
       lng += dlng;
-
       points.add(LatLng(lat / 1E5, lng / 1E5));
     }
     return points;
@@ -1395,69 +1467,28 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   void _launchNavigation() async {
     final prefs = await SharedPreferences.getInstance();
     final hasSeenTip = prefs.getBool('nav_tip_shown') ?? false;
-
     if (!hasSeenTip && mounted) {
       await prefs.setBool('nav_tip_shown', true);
-
-      final confirmed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Navigation Tip', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: const Text(
-            'We\'ll open Waze first (best for PH traffic).\n\n'
-            'If Waze is not installed, Google Maps will open automatically.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Got it!', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      );
-
+      final confirmed = await showDialog<bool>(context: context, barrierDismissible: false, builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Navigation Tip', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text('We\'ll open Waze first (best for PH traffic).\n\nIf Waze is not installed, Google Maps will open automatically.'),
+        actions: [TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Got it!', style: TextStyle(fontWeight: FontWeight.bold)))],
+      ));
       if (confirmed != true) return;
     }
 
-    final originLat = _driverLocation.latitude;
-    final originLng = _driverLocation.longitude;
-    final destLat = widget.customerLocation.latitude;
-    final destLng = widget.customerLocation.longitude;
-
-    final wazeUri = Uri.parse('waze://?ll=$destLat,$destLng&navigate=yes');
-    final googleUri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1'
-      '&origin=$originLat,$originLng'
-      '&destination=$destLat,$destLng'
-      '&travelmode=driving'
-      '&dir_action=navigate',
-    );
+    final wazeUri = Uri.parse('waze://?ll=${widget.customerLocation.latitude},${widget.customerLocation.longitude}&navigate=yes');
+    final googleUri = Uri.parse('https://www.google.com/maps/dir/?api=1&origin=${_driverLocation.latitude},${_driverLocation.longitude}&destination=${widget.customerLocation.latitude},${widget.customerLocation.longitude}&travelmode=driving&dir_action=navigate');
 
     bool opened = false;
-    try {
-      opened = await launchUrl(wazeUri, mode: LaunchMode.externalApplication);
-    } catch (_) {}
-
+    try { opened = await launchUrl(wazeUri, mode: LaunchMode.externalApplication); } catch (_) {}
     if (!opened) {
       try {
         await launchUrl(googleUri, mode: LaunchMode.externalApplication);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Waze not found. Opening Google Maps...'),
-              backgroundColor: Colors.blue,
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Waze not found. Opening Google Maps...'), backgroundColor: Colors.blue, duration: Duration(seconds: 2)));
       } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Opening in browser...')),
-          );
-        }
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening in browser...')));
       }
     }
   }
@@ -1465,11 +1496,7 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Live Tracking - #${widget.orderId}'),
-        backgroundColor: const Color(0xFF052238),
-        foregroundColor: Colors.white,
-      ),
+      appBar: AppBar(title: Text('Live Tracking - #${widget.orderId}'), backgroundColor: const Color(0xFF052238), foregroundColor: Colors.white),
       body: Stack(
         children: [
           GoogleMap(
@@ -1481,9 +1508,7 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
             zoomControlsEnabled: true,
             onMapCreated: (c) => _mapController = c,
           ),
-          if (_isRouteLoading)
-            const Center(child: CircularProgressIndicator(color: Colors.white)),
-
+          if (_isRouteLoading) const Center(child: CircularProgressIndicator(color: Colors.white)),
           if (_routeInfo.isNotEmpty)
             Positioned(
               top: MediaQuery.of(context).padding.top + 10,
@@ -1491,31 +1516,20 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
               right: 16,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.black87,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10)],
-                ),
+                decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10)]),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.access_time, color: Colors.white, size: 20),
                     const SizedBox(width: 8),
-                    Text(
-                      _routeInfo.split('•').first.trim(),
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      ' • ${_routeInfo.split('•').last.trim()}',
-                      style: const TextStyle(color: Colors.white70, fontSize: 16),
-                    ),
+                    Text(_routeInfo.split('•').first.trim(), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(' • ${_routeInfo.split('•').last.trim()}', style: const TextStyle(color: Colors.white70, fontSize: 16)),
                   ],
                 ),
               ),
             ),
         ],
       ),
-
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _launchNavigation,
         backgroundColor: Colors.green,
@@ -1526,4 +1540,3 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
     );
   }
 }
-// --------------------------------//

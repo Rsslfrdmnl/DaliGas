@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:rxdart/rxdart.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; 
+import 'package:flutter/services.dart';
 import 'package:daligas/screens/account_screen.dart';
 import 'package:daligas/screens/cart_screen.dart' as cart;
 import 'package:daligas/screens/help_screen.dart';
@@ -18,6 +18,7 @@ import 'package:carousel_slider/carousel_slider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geoflutterfire_plus/geoflutterfire_plus.dart';
+import 'package:daligas/main_mobile.dart';
 
 int tappedIndex = -1;
 final GlobalKey<CartIconState> cartIconKey = GlobalKey<CartIconState>();
@@ -104,10 +105,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   LatLng? _userLocation;
   Map<String, dynamic>? _activeAddress;
 
-  final StreamController<LatLng?> _locationController = StreamController<LatLng?>.broadcast();
+  // FIXED: BehaviorSubject ensures every address change is detected
+  final BehaviorSubject<LatLng?> _locationSubject = BehaviorSubject<LatLng?>.seeded(null);
+
+  // This stream now starts instantly and never flashes "No shops"
   late final Stream<List<DocumentSnapshot>> _nearbyProductsStream;
 
-  // Reactive cart count with rxdart
   late final BehaviorSubject<int> _cartCountSubject;
 
   String _getMonthName(int month) {
@@ -122,7 +125,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _lpgPriceMax = "";
   String _lpgLastChecked = "";
   bool _lpgPriceLoading = true;
-
   bool _addressLoading = true;
 
   static const double MAX_DISTANCE_KM = 5.0;
@@ -131,43 +133,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Perfect stream: starts with [], never flashes empty state
+    _nearbyProductsStream = _locationSubject.distinct().switchMap((loc) {
+      if (loc == null) return Stream.value(<DocumentSnapshot>[]);
+      return GeoCollectionReference(firestore.collection('products'))
+          .subscribeWithin(
+            center: GeoFirePoint(GeoPoint(loc.latitude, loc.longitude)),
+            radiusInKm: MAX_DISTANCE_KM,
+            field: 'location',
+            geopointFrom: (data) {
+              final geo = (data['location'] as Map<String, dynamic>?)?['geopoint'] as GeoPoint?;
+              return geo ?? const GeoPoint(0, 0);
+            },
+            strictMode: true,
+          );
+    }).startWith([]); // ← Ensures skeleton shows immediately, no flash
+
+    _cartCountSubject = BehaviorSubject<int>.seeded(0);
+    _setupCartListener();
+
     _fetchBannerImages();
     _loadActiveAddress();
     _loadLpgPriceFromFirestore();
+  }
 
-    _nearbyProductsStream = _getNearbyProductsStream().shareReplay(maxSize: 1);
+  @override
+  void dispose() {
+    _locationSubject.close();
+    _cartCountSubject.close();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 
-    // Initialize reactive cart count
-    _cartCountSubject = BehaviorSubject<int>.seeded(0);
-
-    // Listen to cart changes in real-time
+  void _setupCartListener() {
     final user = _authService.currentUser;
     if (user != null) {
-      FirebaseFirestore.instance
-          .collection('carts')
-          .doc(user.uid)
-          .snapshots()
-          .listen((snapshot) {
+      firestore.collection('carts').doc(user.uid).snapshots().listen((snapshot) {
         final items = (snapshot.data()?['items'] as List?)?.length ?? 0;
         if (_cartCountSubject.valueOrNull != items) {
           _cartCountSubject.add(items);
         }
       });
     }
-
-    Future.delayed(const Duration(seconds: 2), () {
-      if (_userLocation != null && mounted) {
-        _locationController.add(_userLocation);
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _cartCountSubject.close();
-    _locationController.close();
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
   }
 
   @override
@@ -187,35 +195,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _userLocation = null;
         _addressLoading = false;
       });
-      _locationController.add(null);
+      _locationSubject.add(null);
       return;
     }
 
     try {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final doc = await firestore.collection('users').doc(user.uid).get();
       if (!doc.exists || doc['addresses'] == null || (doc['addresses'] as List).isEmpty) {
         setState(() {
           _activeAddress = null;
           _userLocation = null;
           _addressLoading = false;
         });
-        _locationController.add(null);
+        _locationSubject.add(null);
         return;
       }
 
       final addresses = List<Map<String, dynamic>>.from(doc['addresses']);
       final active = addresses.firstWhereOrNull((a) => a['isActive'] == true);
 
+      final newLocation = active != null && active['lat'] != null && active['lng'] != null
+          ? LatLng(active['lat'] as double, active['lng'] as double)
+          : null;
+
       setState(() {
         _activeAddress = active;
+        _userLocation = newLocation;
         _addressLoading = false;
-        if (active != null && active['lat'] != null && active['lng'] != null) {
-          _userLocation = LatLng(active['lat'] as double, active['lng'] as double);
-        } else {
-          _userLocation = null;
-        }
-        _locationController.add(_userLocation);
       });
+
+      // Always emit — this fixes address change & pull-to-refresh
+      _locationSubject.add(newLocation);
     } catch (e) {
       debugPrint("Error loading address: $e");
       setState(() {
@@ -223,27 +233,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _userLocation = null;
         _addressLoading = false;
       });
-      _locationController.add(null);
+      _locationSubject.add(null);
     }
   }
 
   Future<void> _loadLpgPriceFromFirestore() async {
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('doe_latest')
-          .doc('lpg')
-          .get();
-
+      final doc = await firestore.collection('doe_latest').doc('lpg').get();
       if (doc.exists) {
         final data = doc.data() as Map<String, dynamic>;
         final Timestamp? timestamp = data['lastChecked'] as Timestamp?;
         String formattedDate = "Unknown";
-
         if (timestamp != null) {
-          final DateTime date = timestamp.toDate().toLocal();
+          final date = timestamp.toDate().toLocal();
           formattedDate = "${_getMonthName(date.month)} ${date.day}, ${date.year}";
         }
-
         setState(() {
           _lpgPriceMin = data['pricePerKgMin']?.toString() ?? "";
           _lpgPriceMax = data['pricePerKgMax']?.toString() ?? "";
@@ -263,7 +267,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _fetchBannerImages() async {
     try {
-      final snapshot = await FirebaseFirestore.instance.collection('banners').orderBy('order').get();
+      final snapshot = await firestore.collection('banners').orderBy('order').get();
       setState(() {
         bannerImages = snapshot.docs.map((doc) => doc['imageUrl'] as String).toList();
       });
@@ -279,12 +283,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         PageRouteBuilder(pageBuilder: (_, __, ___) => page, transitionDuration: Duration.zero),
       );
     }
-
     setState(() => _currentIndex = index);
     switch (index) {
       case 0: break;
       case 1: instantNav(const MessagesScreen()); break;
-      case 2: instantNav(const PurchasesScreen(currentIndex: 2)); break;
+      case 2: instantNav(const PurchasesScreen(currentIndex: 2));  break;
       case 3: instantNav(HelpScreen(currentIndex: 3)); break;
       case 4: instantNav(const AccountScreen(currentIndex: 4)); break;
     }
@@ -305,27 +308,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return true;
   }
 
-  Stream<List<DocumentSnapshot>> _getNearbyProductsStream() {
-    return _locationController.stream
-        .where((loc) => loc != null)
-        .distinct()
-        .switchMap((loc) {
-          return GeoCollectionReference(FirebaseFirestore.instance.collection('products'))
-              .subscribeWithin(
-                center: GeoFirePoint(GeoPoint(loc!.latitude, loc.longitude)),
-                radiusInKm: MAX_DISTANCE_KM,
-                field: 'location',
-                geopointFrom: (data) {
-                  final locationMap = data['location'] as Map<String, dynamic>?;
-                  final geo = locationMap?['geopoint'];
-                  if (geo is GeoPoint) return geo;
-                  return const GeoPoint(0, 0);
-                },
-                strictMode: true,
-              );
-        });
-  }
-
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -340,14 +322,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           leading: const SizedBox.shrink(),
           title: const Text('Home', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
           actions: [
-            // ORIGINAL: Opens SearchScreen
             InkWell(
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen())),
               borderRadius: BorderRadius.circular(20),
               child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.search, color: Colors.white)),
             ),
             const SizedBox(width: 16),
-            // Reactive Cart Badge with rxdart
             StreamBuilder<int>(
               stream: _cartCountSubject.stream,
               builder: (context, snapshot) {
@@ -380,15 +360,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             const Icon(Icons.location_on, color: Colors.white, size: 24),
                             const SizedBox(width: 8),
                             _addressLoading
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
-                                  )
+                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54))
                                 : Text(
                                     _activeAddress != null
                                         ? '${_activeAddress!['street'] ?? 'No street'}'.trim()
-                                        : 'Set your delivery address',
+                                        : 'Add address here',
                                     style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
                                     overflow: TextOverflow.ellipsis,
                                     maxLines: 1,
@@ -399,11 +375,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           child: _lpgPriceLoading
                               ? const Align(
                                   alignment: Alignment.centerRight,
-                                  child: SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
-                                  ),
+                                  child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54)),
                                 )
                               : Column(
                                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -449,7 +421,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
         ),
-        // 1. Pull-to-Refresh
         body: RefreshIndicator(
           onRefresh: () async {
             await Future.wait([
@@ -457,6 +428,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _loadLpgPriceFromFirestore(),
               _fetchBannerImages(),
             ]);
+            // Force refresh products even if location same
+            _locationSubject.add(_userLocation);
           },
           color: Colors.cyan,
           child: SingleChildScrollView(
@@ -535,11 +508,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: StreamBuilder<List<DocumentSnapshot>>(
-                      key: ValueKey(_userLocation),
-                      stream: _userLocation == null ? const Stream.empty() : _nearbyProductsStream,
+                      stream: _nearbyProductsStream,
                       builder: (context, snapshot) {
-                        // 3. Skeleton Loading
-                        if (snapshot.connectionState == ConnectionState.waiting) {
+                        // Show skeleton while loading or first load
+                        if (snapshot.connectionState == ConnectionState.waiting || !snapshot.hasData) {
                           return GridView.builder(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
@@ -553,7 +525,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             itemBuilder: (_, __) => const _SkeletonProductCard(),
                           );
                         }
-                        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+
+                        final nearby = snapshot.data!;
+                        if (nearby.isEmpty) {
                           return Center(
                             child: Padding(
                               padding: const EdgeInsets.all(32),
@@ -575,7 +549,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           );
                         }
 
-                        final nearby = snapshot.data!;
                         return GridView.builder(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
@@ -611,7 +584,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               onTapDown: (_) => setState(() => tappedIndex = index),
                               onTapUp: (_) => setState(() => tappedIndex = -1),
                               onTapCancel: () => setState(() => tappedIndex = -1),
-                              // 10. Haptic Feedback
                               onTap: () {
                                 HapticFeedback.lightImpact();
                                 Navigator.push(
@@ -657,7 +629,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                                 Text('₱${price.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1ED2AF))),
                                                 const SizedBox(height: 6),
                                                 StreamBuilder<QuerySnapshot>(
-                                                  stream: FirebaseFirestore.instance.collection('products').doc(doc.id).collection('reviews').snapshots(),
+                                                  stream: firestore.collection('products').doc(doc.id).collection('reviews').snapshots(),
                                                   builder: (context, snapshot) {
                                                     double rating = 0.0;
                                                     if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
@@ -721,7 +693,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 }
 
-// 3. Skeleton Card
 class _SkeletonProductCard extends StatelessWidget {
   const _SkeletonProductCard();
   @override

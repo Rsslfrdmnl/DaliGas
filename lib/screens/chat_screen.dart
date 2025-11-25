@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 import 'package:daligas/screens/messages_screen.dart';
+import 'package:daligas/main_mobile.dart';
 
 class ChatScreen extends StatefulWidget {
   final String title;
@@ -40,7 +41,7 @@ class _ChatScreenState extends State<ChatScreen> {
 @override
 void initState() {
   super.initState();
-  _messagesRef = FirebaseFirestore.instance
+  _messagesRef = firestore
       .collection('chats')
       .doc(widget.chatId)
       .collection('messages');
@@ -102,7 +103,7 @@ void initState() {
         nameField = 'name';
       }
 
-      final doc = await FirebaseFirestore.instance
+      final doc = await firestore
           .collection(collection)
           .doc(targetId)
           .get();
@@ -130,7 +131,7 @@ void initState() {
 
     _controller.clear();
 
-    final chatRef = FirebaseFirestore.instance.collection('chats').doc(widget.chatId);
+    final chatRef = firestore.collection('chats').doc(widget.chatId);
 
     // CREATE CHAT DOCUMENT IF NOT EXISTS
     final chatDoc = await chatRef.get();
@@ -225,7 +226,7 @@ void initState() {
                   ),
                 );
                 if (confirmed == true) {
-                  final batch = FirebaseFirestore.instance.batch();
+                  final batch = firestore.batch();
                   final snapshot = await _messagesRef.get();
                   for (var doc in snapshot.docs) {
                     if ((doc['senderId'] == userId) || widget.isEmployee) {
@@ -299,7 +300,7 @@ void initState() {
                   final parts = widget.chatId.split('_');
                   final driverId = parts[1]; // employee is always index 1
 
-                  await FirebaseFirestore.instance.collection('reports').add({
+                  await firestore.collection('reports').add({
                     'reporterId': userId,
                     'driverId': driverId,
                     'chatId': widget.chatId,

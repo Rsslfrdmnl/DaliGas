@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';  
 import 'package:daligas/screens/home_screen.dart';
 import 'package:daligas/screens/employee_orders_screen.dart';
+import 'package:daligas/main_mobile.dart';
 
 class PhoneSignInScreen extends StatefulWidget {
   const PhoneSignInScreen({super.key});
@@ -17,7 +18,7 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen> {
   late TextEditingController _otpController;
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore = firestore;
 
   String? _verificationId;
   bool _codeSent = false;
@@ -91,13 +92,13 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final userQuery = await _firestore
+      final userQuery = await firestore
           .collection('users')
           .where('phone', isEqualTo: formattedDbPhone)
           .limit(1)
           .get();
 
-      final adminQuery = await _firestore
+      final adminQuery = await firestore
           .collection('admins')
           .where('phone', isEqualTo: formattedDbPhone)
           .limit(1)
@@ -222,13 +223,13 @@ Future<void> _navigateAfterLoginByPhone(String phone) async {
   String? username;
   Widget? targetScreen;
 
-  final userQuery = await _firestore
+  final userQuery = await firestore
       .collection('users')
       .where('phone', isEqualTo: phone)
       .limit(1)
       .get();
 
-  final adminQuery = await _firestore
+  final adminQuery = await firestore
       .collection('admins')
       .where('phone', isEqualTo: phone)
       .limit(1)

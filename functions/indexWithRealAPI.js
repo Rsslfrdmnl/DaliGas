@@ -242,118 +242,151 @@ export const createOrder = onCall({ region: REGION, database: "daligas"}, async 
 });
 
 /* -------------------------------------------------------
-   createPaymongoPayment — GCash Flow
+   createPaymongoPayment – ERROR-PROOF FOR LIVE
 ---------------------------------------------------------- */
 export const createPaymongoPayment = onCall(
   { region: REGION, secrets: ["PAYMONGO_SECRET_KEY"], database: "daligas" },
   async (request) => {
+    // Early validation with clear errors
     const { userId, items, deliveryAddress } = request.data;
-
-    if (!userId || !items?.length || !deliveryAddress)
-      throw new HttpsError("invalid-argument", "Missing required fields.");
-
-    if (!request.auth)
+    if (!userId || !items?.length || !deliveryAddress) {
+      throw new HttpsError("invalid-argument", "Missing required fields: userId, items, or deliveryAddress.");
+    }
+    if (!request.auth) {
       throw new HttpsError("unauthenticated", "Login required.");
+    }
 
-    const PAYMONGO_SECRET_KEY = defineSecret("PAYMONGO_SECRET_KEY").value();
-    const total = items.reduce((sum, i) => sum + Number(i.price) * Number(i.quantity), 0);
+    let total = 0;
+    try {
+      total = items.reduce((sum, i) => sum + Number(i.price || 0) * Number(i.quantity || 0), 0);
+    } catch (e) {
+      throw new HttpsError("invalid-argument", `Invalid items data: ${e.message}. Ensure price/quantity are numbers.`);
+    }
+
     const amountInCentavos = Math.round(total * 100);
-
-    if (amountInCentavos < 100)
-      throw new HttpsError("invalid-argument", "Order total must be at least ₱1.00");
+    if (amountInCentavos < 100) {
+      throw new HttpsError("invalid-argument", "Order total must be at least ₱1.00.");
+    }
 
     try {
-      const chosenEmployeeId = await assignEmployee();
-      if (!chosenEmployeeId) throw new HttpsError("failed-precondition", "No employees available.");
+      const PAYMONGO_SECRET_KEY = defineSecret("PAYMONGO_SECRET_KEY").value();
+      if (!PAYMONGO_SECRET_KEY || !PAYMONGO_SECRET_KEY.startsWith('sk_live_')) {
+        throw new HttpsError("internal", "PayMongo configuration error. Contact support.");
+      }
+
+      // Assign employee safely
+      let chosenEmployeeId = null;
+      try {
+        chosenEmployeeId = await assignEmployee();
+        if (!chosenEmployeeId) throw new Error("No employees available.");
+      } catch (e) {
+        logger.warn(`Employee assignment failed: ${e.message}. Proceeding without.`);
+      }
 
       const orderRef = db.collection("orders").doc();
       const orderId = orderRef.id;
 
+      // Safe order creation (no stock deduction)
       await orderRef.set({
-        orderId: orderRef.id,
+        orderId,
         userId,
         employeeId: chosenEmployeeId,
         items,
         total,
         paymentMethod: "gcash",
-        paymentStatus: "Pending",
-        deliveryStatus: "Processing",
+        paymentStatus: "Awaiting Payment",
+        deliveryStatus: "Pending",
         deliveryAddress,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         paidVia: "PayMongo",
+        paymongoSourceId: null,
+        checkoutUrl: null,
+        expiresAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      await Promise.all(items.map(async (item) => {
-        const productRef = db.collection("products").doc(item.productId);
-        return db.runTransaction(async (t) => {
-          const doc = await t.get(productRef);
-          if (!doc.exists) return;
-          const currentStock = doc.data()?.stock || 0;
-          const newStock = Math.max(currentStock - item.quantity, 0);
-          t.update(productRef, { stock: newStock });
-        });
-      }));
+      logger.info(`Order ${orderId} created successfully. Total: ₱${total.toFixed(2)}`);
 
+      // PayMongo API call – REPLACED WITH YOUR EXACT VERSION
       const authHeader = `Basic ${Buffer.from(`${PAYMONGO_SECRET_KEY}:`).toString("base64")}`;
-
-      const sourceResponse = await axios({
-        method: "post",
-        url: "https://api.paymongo.com/v1/sources",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: authHeader,
-        },
-        data: {
-          data: {
-            attributes: {
-              amount: amountInCentavos,
-              type: "gcash",
-              currency: "PHP",
-              redirect: {
-                success: `https://daligas.app/success?orderId=${orderId}`,
-                failed: `https://daligas.app/failed?orderId=${orderId}`,
-              },
-            },
+      let sourceResponse;
+      try {
+        sourceResponse = await axios({
+          method: "post",
+          url: "https://api.paymongo.com/v1/sources",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": authHeader,
+            "Accept": "application/json",
           },
-        },
-      });
+          data: {
+            data: {
+              attributes: {
+                amount: amountInCentavos,
+                currency: "PHP",
+                type: "gcash",
+                redirect: {
+                  success: `https://daligas.app/success?orderId=${orderId}`,
+                  failed: `https://daligas.app/failed?orderId=${orderId}`
+                }
+              }
+            }
+          }
+        });
+      } catch (apiError) {
+        const errorMsg = apiError.response?.data?.errors?.[0]?.detail || apiError.response?.data?.message || apiError.message || "Unknown PayMongo error";
+        logger.error(`PayMongo API failed for order ${orderId}: ${errorMsg}`, { error: apiError.response?.data });
+        await orderRef.delete();
+        throw new HttpsError("internal", `Payment setup failed: ${errorMsg}. Please try again.`);
+      }
 
       const source = sourceResponse.data.data;
+      if (!source?.attributes?.redirect?.checkout_url) {
+        await orderRef.delete();
+        throw new HttpsError("internal", "Invalid PayMongo response. Please try again.");
+      }
 
       await orderRef.update({
         paymongoSourceId: source.id,
         checkoutUrl: source.attributes.redirect.checkout_url,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       });
 
-      const userDoc = await db.collection("users").doc(userId).get();
-      const fcmToken = userDoc.data()?.fcmToken;
-      const shortId = orderId.substring(0, 8);
-
-      if (fcmToken) {
-        await safeSendFCM({
-          token: fcmToken,
-          notification: {
-            title: "GCash Payment Required",
-            body: `Order #${shortId} • ₱${total.toFixed(2)} • Complete in GCash`,
-          },
-          data: { type: "order", orderId, click_action: "FLUTTER_NOTIFICATION_CLICK" },
-        }, userId);
+      // Optional FCM notification
+      try {
+        const userDoc = await db.collection("users").doc(userId).get();
+        const fcmToken = userDoc.data()?.fcmToken;
+        const shortId = orderId.substring(0, 8);
+        if (fcmToken) {
+          await safeSendFCM({
+            token: fcmToken,
+            notification: { title: "GCash Payment Required", body: `Order #${shortId} • ₱${total.toFixed(2)} • Complete in GCash` },
+            data: { type: "order", orderId, click_action: "FLUTTER_NOTIFICATION_CLICK" },
+          }, userId);
+        }
+      } catch (fcmError) {
+        logger.warn(`FCM send failed for user ${userId}: ${fcmError.message}`);
       }
 
-      return {
-        success: true,
-        redirectUrl: source.attributes.redirect.checkout_url,
-        orderId: orderId,
-      };
+      logger.info(`PayMongo source created for order ${orderId}. Redirect ready.`);
+      return { success: true, redirectUrl: source.attributes.redirect.checkout_url, orderId };
+
     } catch (error) {
-      logger.error("createPaymongoPayment failed:", error.response?.data || error);
-      throw new HttpsError("internal", "GCash payment setup failed. Please try again.");
+      const safeError = error instanceof HttpsError ? error : new HttpsError("internal", error.message || "Unknown error");
+      logger.error(`createPaymongoPayment error: ${safeError.message}`, {
+        userId,
+        total,
+        itemsCount: items.length,
+        errorCode: safeError.code,
+        stack: error.stack?.substring(0, 1000),
+      });
+      throw safeError;
     }
   }
 );
 
 /* -------------------------------------------------------
-   PayMongo Webhook – Confirm GCash Payment
+   PayMongo Webhook – NOW THE SINGLE SOURCE OF TRUTH
+   Handles: SUCCESS, FAILED, EXPIRED
 ---------------------------------------------------------- */
 export const paymongoWebhook = https.onRequest(
   { region: REGION, secrets: ["PAYMONGO_WEBHOOK_SECRET"], database: "daligas" },
@@ -362,17 +395,14 @@ export const paymongoWebhook = https.onRequest(
 
     const PAYMONGO_WEBHOOK_SECRET = defineSecret("PAYMONGO_WEBHOOK_SECRET").value();
     const signature = req.headers["paymongo-signature"];
-
-    if (!signature || !PAYMONGO_WEBHOOK_SECRET) {
-      return res.status(401).send("Unauthorized");
-    }
+    if (!signature || !PAYMONGO_WEBHOOK_SECRET) return res.status(401).send("Unauthorized");
 
     const [tPart, v1Part] = signature.split(",");
     const timestamp = tPart.split("=")[1];
     const providedSig = v1Part.split("=")[1];
     const payload = JSON.stringify(req.body);
     const expectedSig = require("crypto")
-      .createHmac("sha256ॉ", PAYMONGO_WEBHOOK_SECRET)
+      .createHmac("sha256", PAYMONGO_WEBHOOK_SECRET)
       .update(`${timestamp}.${payload}`)
       .digest("hex");
 
@@ -382,148 +412,91 @@ export const paymongoWebhook = https.onRequest(
     }
 
     const event = req.body.data;
+    const eventType = event.attributes.type;
 
-    if (event.attributes.type === 'source.chargeable') {
+    // 1. SUCCESS – source.chargeable
+    if (eventType === "source.chargeable") {
       const source = event.attributes.data;
-      if (source.attributes.type !== 'gcash') return res.json({ received: true });
+      if (source.attributes.type !== "gcash") return res.json({ received: true });
 
       const match = source.attributes.redirect.success.match(/orderId=([^&]+)/);
-      if (!match) {
-        logger.warn("No orderId in redirect URL");
-        return res.json({ received: true });
-      }
+      if (!match) return res.json({ received: true });
       const orderId = match[1];
 
-      const orderDoc = await db.collection('orders').doc(orderId).get();
+      const orderRef = db.collection("orders").doc(orderId);
+      const orderDoc = await orderRef.get();
 
-      if (!orderDoc.exists || orderDoc.data()?.paymentStatus !== 'Pending') {
-        logger.info("Order not pending or already processed:", orderId);
+      if (!orderDoc.exists || orderDoc.data()?.paymentStatus !== "Awaiting Payment") {
+        logger.info("Order already processed or invalid:", orderId);
         return res.json({ received: true });
       }
 
       const orderData = orderDoc.data();
 
-      await orderDoc.ref.update({
-        paymentStatus: 'Paid',
-        deliveryStatus: 'Processing',
-        paidAt: admin.firestore.FieldValue.serverTimestamp(),
-        isPendingGcash: false,
-      });
-
+      // DEDUCT STOCK ONLY NOW – THIS IS THE ONLY PLACE
       await Promise.all(
         orderData.items.map(async (item) => {
           const productId = item.productId || item.id;
           if (!productId) return;
-
           const productRef = db.collection("products").doc(productId);
           await db.runTransaction(async (t) => {
             const doc = await t.get(productRef);
             if (!doc.exists) return;
             const currentStock = doc.data()?.stock || 0;
-            const newStock = Math.max(currentStock - (item.quantity || 1), 0);
-            t.update(productRef, { stock: newStock });
+            if (currentStock < (item.quantity || 1)) {
+              throw new Error(`Insufficient stock for ${productId}`);
+            }
+            t.update(productRef, { stock: currentStock - (item.quantity || 1) });
           });
         })
       );
 
-      const employeeId = await assignEmployee();
-      if (employeeId) {
-        await orderDoc.ref.update({ employeeId });
-      }
+      await orderRef.update({
+        paymentStatus: "Paid",
+        deliveryStatus: "Processing",
+        paidAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
 
-      const shortId = orderId.substring(0, 8);
+      // Send notification
       const userDoc = await db.collection("users").doc(orderData.userId).get();
       const fcmToken = userDoc.data()?.fcmToken;
-
       if (fcmToken) {
         await safeSendFCM({
           token: fcmToken,
           notification: {
             title: "Payment Confirmed!",
-            body: `Your GCash payment for Order #${shortId} was successful!`,
+            body: `Your GCash payment for Order #${orderId.substring(0, 8)} was successful!`,
           },
           data: { type: "order", orderId },
         }, orderData.userId);
       }
 
-      logger.log(`Pending GCash order ${orderId} finalized successfully`);
+      logger.log(`GCash order ${orderId} PAID & stock deducted`);
     }
 
-    res.json({ received: true });
-  }
-);
+    // 2. FAILED / EXPIRED – cancel order + return stock (if any was held)
+    else if (eventType === "source.failed" || eventType === "source.expired") {
+      const source = event.attributes.data;
+      const orderId = source.attributes.redirect?.failed?.match(/orderId=([^&]+)/)?.[1] ||
+                     source.attributes.redirect?.success?.match(/orderId=([^&]+)/)?.[1];
 
-// -------------------------------------------------------
-// Auto-cancel abandoned GCash orders after 24 hours
-// -------------------------------------------------------
-export const cleanupAbandonedGcashOrders = onSchedule(
-  {
-    schedule: "every 24 hours",
-    timeZone: "Asia/Manila",        // Good for PH users
-    region: REGION,
-  },
-  async (event) => {
-    const cutoff = admin.firestore.Timestamp.fromDate(
-      new Date(Date.now() - 24 * 60 * 60 * 1000) // 24 hours ago
-    );
+      if (!orderId) return res.json({ received: true });
 
-    const abandonedOrdersSnap = await db
-      .collection("orders")
-      .where("paymentMethod", "==", "gcash")
-      .where("paymentStatus", "==", "Pending")
-      .where("createdAt", "<", cutoff)
-      .get();
+      const orderRef = db.collection("orders").doc(orderId);
+      const orderDoc = await orderRef.get();
+      if (!orderDoc.exists) return res.json({ received: true });
 
-    if (abandonedOrdersSnap.empty) {
-      logger.info("No abandoned GCash orders found.");
-      return null;
-    }
-
-    const batch = db.batch();
-    let count = 0;
-
-    for (const doc of abandonedOrdersSnap.docs) {
-      count++;
-      const orderData = doc.data();
-
-      // Cancel order
-      batch.update(doc.ref, {
-        paymentStatus: "Expired",
+      await orderRef.update({
+        paymentStatus: "Failed",
         deliveryStatus: "Cancelled",
-        cancelledReason: "GCash payment not completed within 24 hours",
+        cancelReason: eventType === "source.expired" ? "Payment expired" : "Payment failed",
         cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // Restock items
-      for (const item of orderData.items || []) {
-        const productId = item.productId || item.id;
-        if (productId && item.quantity > 0) {
-          const productRef = db.collection("products").doc(productId);
-          batch.update(productRef, {
-            stock: admin.firestore.FieldValue.increment(item.quantity),
-          });
-        }
-      }
-
-      // Notify user
-      const userSnap = await db.collection("users").doc(orderData.userId).get();
-      const fcmToken = userSnap.data()?.fcmToken;
-
-      if (fcmToken) {
-        await safeSendFCM({
-          token: fcmToken,
-          notification: {
-            title: "Order Expired",
-            body: `Order #${doc.id.substring(0, 8)} was cancelled — GCash payment not completed in time.`,
-          },
-          data: { type: "order", orderId: doc.id },
-        }, orderData.userId);
-      }
+      logger.log(`GCash order ${orderId} cancelled: ${eventType}`);
     }
 
-    await batch.commit();
-    logger.info(`Cleaned up ${count} abandoned GCash orders.`);
-    return null;
+    res.json({ received: true });
   }
 );
 

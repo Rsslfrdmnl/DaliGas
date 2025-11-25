@@ -1,4 +1,3 @@
-// lib/screens/all_comments_screen.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,6 +8,7 @@ import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
+import 'package:daligas/main_mobile.dart';
 
 class AllCommentsScreen extends StatefulWidget {
   final String productId;
@@ -25,7 +25,7 @@ class _AllCommentsScreenState extends State<AllCommentsScreen> {
   // ── REACTION (LIKE / DISLIKE) ─────────────────────────────────────
   Future<void> _toggleReaction(String commentId, bool isLike) async {
   if (_user == null) return;
-  final reactionRef = FirebaseFirestore.instance
+  final reactionRef = firestore
       .collection('products')
       .doc(widget.productId)
       .collection('comments')
@@ -33,13 +33,13 @@ class _AllCommentsScreenState extends State<AllCommentsScreen> {
       .collection('reactions')
       .doc(_user!.uid);
 
-  final commentRef = FirebaseFirestore.instance
+  final commentRef = firestore
       .collection('products')
       .doc(widget.productId)
       .collection('comments')
       .doc(commentId);
 
-  await FirebaseFirestore.instance.runTransaction((tx) async {
+  await firestore.runTransaction((tx) async {
     final snap = await reactionRef.get();
     final current = snap.data()?['type'] as String?;
 
@@ -86,7 +86,7 @@ class _AllCommentsScreenState extends State<AllCommentsScreen> {
   // ── REPORT COMMENT ───────────────────────────────────────────────
   Future<void> _reportComment(String commentId, String reason) async {
     if (_user == null) return;
-    await FirebaseFirestore.instance.collection('reports').add({
+    await firestore.collection('reports').add({
       'type': 'comment',
       'productId': widget.productId,
       'commentId': commentId,
@@ -116,7 +116,7 @@ class _AllCommentsScreenState extends State<AllCommentsScreen> {
       ),
     );
     if (result != null && result.isNotEmpty) {
-      await FirebaseFirestore.instance
+      await firestore
           .collection('products')
           .doc(widget.productId)
           .collection('comments')
@@ -138,7 +138,7 @@ class _AllCommentsScreenState extends State<AllCommentsScreen> {
       ),
     );
     if (ok == true) {
-      await FirebaseFirestore.instance
+      await firestore
           .collection('products')
           .doc(widget.productId)
           .collection('comments')
@@ -166,10 +166,10 @@ class _AllCommentsScreenState extends State<AllCommentsScreen> {
     );
     if (result != null && result.isNotEmpty) {
       final userDoc =
-          await FirebaseFirestore.instance.collection('users').doc(_user!.uid).get();
+          await firestore.collection('users').doc(_user!.uid).get();
       final username = userDoc['username'] ?? 'Anonymous';
 
-      await FirebaseFirestore.instance
+      await firestore
           .collection('products')
           .doc(widget.productId)
           .collection('comments')
@@ -194,7 +194,7 @@ class _AllCommentsScreenState extends State<AllCommentsScreen> {
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
+        stream: firestore
             .collection('products')
             .doc(widget.productId)
             .collection('comments')
@@ -317,7 +317,7 @@ class _AllCommentsScreenState extends State<AllCommentsScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               StreamBuilder<DocumentSnapshot>(
-                                stream: FirebaseFirestore.instance
+                                stream: firestore
                                     .collection('products')
                                     .doc(widget.productId)
                                     .collection('comments')
@@ -401,7 +401,7 @@ class _AllCommentsScreenState extends State<AllCommentsScreen> {
 
                       // REPLIES
                       StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance
+                        stream: firestore
                             .collection('products')
                             .doc(widget.productId)
                             .collection('comments')

@@ -1,7 +1,3 @@
-
-
-// UPDATED SCREEN //
-
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +13,7 @@ import 'employee_orders_screen.dart';
 import 'package:daligas/screens/welcome_screen.dart';
 import 'package:daligas/screens/notifications_screen.dart';
 import 'package:flutter/services.dart'; // For SystemNavigator
+import 'package:daligas/main_mobile.dart';
 
 /// Firestore & Storage path constants
 class FirestorePaths {
@@ -35,7 +32,7 @@ class EmployeeAccountScreen extends StatefulWidget {
 class _EmployeeAccountScreenState extends State<EmployeeAccountScreen>
     with WidgetsBindingObserver {
   final _auth = FirebaseAuth.instance;
-  final _firestore = FirebaseFirestore.instance;
+  final _firestore = firestore;
 
   String name = '';
   String email = '';
@@ -70,7 +67,7 @@ class _EmployeeAccountScreenState extends State<EmployeeAccountScreen>
     final user = _auth.currentUser;
     if (user == null) return;
 
-    _firestore
+    firestore
         .collection(FirestorePaths.employees)
         .doc(user.uid)
         .collection('notifications')
@@ -89,7 +86,7 @@ class _EmployeeAccountScreenState extends State<EmployeeAccountScreen>
         setState(() => isLoading = false);
         return;
       }
-      final doc = await _firestore
+      final doc = await firestore
           .collection(FirestorePaths.employees)
           .doc(user.uid)
           .get();
@@ -348,7 +345,7 @@ class EmployeeProfileScreen extends StatefulWidget {
 
 class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
   final _auth = FirebaseAuth.instance;
-  final _firestore = FirebaseFirestore.instance;
+  final _firestore = firestore;
   final _storage = FirebaseStorage.instance;
 
   late TextEditingController nameController;
@@ -434,7 +431,7 @@ class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
 
       await user.linkWithCredential(credential);
 
-      await _firestore
+      await firestore
           .collection(FirestorePaths.employees)
           .doc(user.uid)
           .update({'phone': widget.phone.isNotEmpty ? widget.phone : user.phoneNumber});
@@ -598,7 +595,7 @@ class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
       await ref.putFile(compressedFile);
       final url = await ref.getDownloadURL();
 
-      await _firestore
+      await firestore
           .collection(FirestorePaths.employees)
           .doc(user.uid)
           .update({'profileImage': url});
@@ -635,7 +632,7 @@ class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
 
     setState(() => isSaving = true);
     try {
-      await _firestore
+      await firestore
           .collection(FirestorePaths.employees)
           .doc(user.uid)
           .update({'name': trimmedName});

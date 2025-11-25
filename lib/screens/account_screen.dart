@@ -15,6 +15,7 @@ import 'package:daligas/screens/purchases_screen.dart';
 import 'package:daligas/screens/help_screen.dart';
 import 'package:daligas/screens/welcome_screen.dart';
 import 'package:daligas/screens/notifications_screen.dart';
+import 'package:daligas/main_mobile.dart';
 import 'change_password_screen.dart';
 import 'manage_address_screen.dart';
 
@@ -28,7 +29,7 @@ class AccountScreen extends StatefulWidget {
 
 class _AccountScreenState extends State<AccountScreen> {
   final _auth = FirebaseAuth.instance;
-  final _firestore = FirebaseFirestore.instance;
+  final _firestore = firestore;
 
   // ── Reactive Streams ─────────────────────
   final BehaviorSubject<Map<String, dynamic>> _userData = BehaviorSubject.seeded({
@@ -39,7 +40,7 @@ class _AccountScreenState extends State<AccountScreen> {
   });
   final BehaviorSubject<bool> _isLoading = BehaviorSubject.seeded(true);
 
-  late final StreamSubscription _userSub;
+  StreamSubscription? _userSub;
 
   // ── Double-Back-to-Exit ──────────────────
   DateTime? _lastBackPress;
@@ -70,18 +71,26 @@ class _AccountScreenState extends State<AccountScreen> {
 
   @override
   void dispose() {
-    _userSub.cancel();
+    _userSub?.cancel();
     _userData.close();
     _isLoading.close();
     super.dispose();
   }
 
-  void _listenToUser() {
+  void _listenToUser() async {
+    // Cancel any previous subscription
+    await _userSub?.cancel();
+    _userSub = null;
+
     final user = _auth.currentUser;
-    if (user == null) {
-      _isLoading.add(false);
+    if (user == null || !mounted) {
+      if (!mounted) return;
+      if (!_isLoading.isClosed) _isLoading.add(false);
       return;
     }
+
+    // Show loading
+    if (!_isLoading.isClosed) _isLoading.add(true);
 
     _userSub = _firestore
         .collection('users')
@@ -90,27 +99,34 @@ class _AccountScreenState extends State<AccountScreen> {
         .debounceTime(const Duration(milliseconds: 300))
         .listen(
       (doc) {
+        if (!mounted) return;
+
+        final Map<String, dynamic> newData;
         if (!doc.exists) {
-          _userData.add({
+          newData = {
             'fullName': 'User',
             'email': user.email ?? '',
             'phone': user.phoneNumber ?? '',
             'profileImage': '',
-          });
-          _isLoading.add(false);
-          return;
+          };
+        } else {
+          final data = doc.data()!;
+          newData = {
+            'fullName': (data['fullName'] ?? 'User') as String,
+            'email': (data['email'] ?? user.email ?? '') as String,
+            'phone': (data['phone'] ?? user.phoneNumber ?? '') as String,
+            'profileImage': (data['profileImage'] ?? '') as String,
+          };
         }
 
-        final data = doc.data()!;
-        _userData.add({
-          'fullName': (data['fullName'] ?? 'User') as String,
-          'email': (data['email'] ?? user.email ?? '') as String,
-          'phone': (data['phone'] ?? user.phoneNumber ?? '') as String,
-          'profileImage': (data['profileImage'] ?? '') as String,
-        });
-        _isLoading.add(false);
+        // SAFE: Only add if not closed
+        if (!_userData.isClosed) _userData.add(newData);
+        if (!_isLoading.isClosed) _isLoading.add(false);
       },
-      onError: (_) => _isLoading.add(false),
+      onError: (e) {
+        debugPrint('User stream error: $e');
+        if (mounted && !_isLoading.isClosed) _isLoading.add(false);
+      },
     );
   }
 
@@ -217,9 +233,10 @@ class _AccountScreenState extends State<AccountScreen> {
                             ),
                           ),
                         );
-                        if (updated == true) {
+
+                        if (updated == true && mounted) {
                           HapticFeedback.lightImpact();
-                          _isLoading.add(true);
+                          _listenToUser(); // Safe: recreates listener
                         }
                       }),
                       _menuTile('Notifications', onTap: () {
@@ -339,7 +356,7 @@ class MyProfileScreen extends StatefulWidget {
 
 class _MyProfileScreenState extends State<MyProfileScreen> {
   final _auth = FirebaseAuth.instance;
-  final _firestore = FirebaseFirestore.instance;
+  final _firestore = firestore;
   final _storage = FirebaseStorage.instance;
 
   late final TextEditingController _fullNameController;
@@ -402,19 +419,19 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     final user = _auth.currentUser;
     if (user == null || !mounted) return;
 
-    _isUploading.add(true);
+    if (!_isUploading.isClosed) _isUploading.add(true);
     try {
       final ref = _storage.ref().child('profile_pictures/${user.uid}.jpg');
       await ref.putFile(file);
       final url = await ref.getDownloadURL();
       await _firestore.collection('users').doc(user.uid).update({'profileImage': url});
 
-      _profileImageUrl.add(url);
-      _isUploading.add(false);
+      if (!_profileImageUrl.isClosed) _profileImageUrl.add(url);
+      if (!_isUploading.isClosed) _isUploading.add(false);
       HapticFeedback.lightImpact();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile picture updated')));
     } catch (e) {
-      _isUploading.add(false);
+      if (!_isUploading.isClosed) _isUploading.add(false);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Upload failed')));
     }
   }
@@ -429,7 +446,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       return;
     }
 
-    _isSaving.add(true);
+    if (!_isSaving.isClosed) _isSaving.add(true);
     try {
       await _firestore.collection('users').doc(user.uid).update({'fullName': name});
       HapticFeedback.mediumImpact();
@@ -438,7 +455,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Update failed')));
     } finally {
-      _isSaving.add(false);
+      if (!_isSaving.isClosed) _isSaving.add(false);
     }
   }
 
@@ -450,7 +467,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     Navigator.push(context, MaterialPageRoute(builder: (_) => const ManageAddressScreen()));
   }
 
-    @override
+  @override
   Widget build(BuildContext context) {
     final phoneLinked = _isPhoneLinked;
     final currentUser = _auth.currentUser;

@@ -1,9 +1,7 @@
-// lib/screens/signin_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:daligas/services/auth_service.dart';
-import 'package:daligas/main_mobile.dart';
+import 'package:daligas/main_mobile.dart'; // ← This gives us global firestore & saveFcmToken
 import 'package:daligas/screens/home_screen.dart';
 import 'package:daligas/screens/employee_orders_screen.dart';
 import 'package:daligas/screens/forgot_password_screen.dart';
@@ -40,7 +38,6 @@ class _SignInScreenState extends State<SignInScreen> {
 
     final identifier = _identifierController.text.trim();
     final password = _passwordController.text.trim();
-    final firestore = FirebaseFirestore.instance;
 
     try {
       String? emailToUse;
@@ -61,12 +58,12 @@ class _SignInScreenState extends State<SignInScreen> {
             .get();
 
         if (userQuery.docs.isNotEmpty) {
-          final doc = userQuery.docs.first;
-          emailToUse = doc['email'];
-          username = doc['username'];
-          role = doc['role'];
-          sourceCollection = 'users';
-        } 
+            final doc = userQuery.docs.first;
+            emailToUse = doc['email'];
+            username = doc['username'];
+            role = doc['role'];
+            sourceCollection = 'users';
+          } 
         // === 2. Check 'employees' collection ===
         else {
           final empQuery = await firestore
@@ -170,11 +167,11 @@ class _SignInScreenState extends State<SignInScreen> {
           ),
         );
 
-        // === ADD THIS: Save FCM token immediately after login ===
+        // Save FCM token after successful login
         final currentUser = FirebaseAuth.instance.currentUser;
         if (currentUser != null) {
-          await saveFcmToken(currentUser); // ← FROM main_mobile.dart
-          debugPrint("FCM token saved after login for ${currentUser.uid}");
+          await saveFcmToken(currentUser);
+          debugPrint("FCM token saved for ${currentUser.uid}");
         }
       }
     } catch (e) {

@@ -2,6 +2,7 @@ import 'dart:async'; // ← ADD
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:daligas/screens/product_detail_screen.dart';
+import 'package:daligas/main_mobile.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -103,7 +104,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       ),
                     )
                   : StreamBuilder<QuerySnapshot>(
-                      stream: FirebaseFirestore.instance.collection('products').snapshots(),
+                      stream: firestore.collection('products').snapshots(),
                       builder: (context, snapshot) {
                         if (snapshot.connectionState == ConnectionState.waiting) {
                           return const Center(child: CircularProgressIndicator(color: Colors.white));

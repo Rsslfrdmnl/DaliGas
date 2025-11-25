@@ -19,14 +19,8 @@ import 'admin_feedbacks_screen.dart';
 import 'admin_reports_screen.dart';
 import 'admin_settings_screen.dart';
 import 'package:uuid/uuid.dart';
-
-// -----------------------------------------------------------------------------
-//  IMPORT THE FULL-FEATURED PICKER (create this file separately)
-// -----------------------------------------------------------------------------
-import 'location_picker_screen.dart';   // <-- adjust path if needed
-// -----------------------------------------------------------------------------
-//  (Optional – only needed on mobile)
-// -----------------------------------------------------------------------------
+import 'package:daligas/web/main_web.dart';
+import 'location_picker_screen.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:google_places_flutter/google_places_flutter.dart';
@@ -77,7 +71,7 @@ class AdminInventoryScreen extends StatefulWidget {
 }
 
 class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
-  final _productsRef = FirebaseFirestore.instance.collection('products');
+  final _productsRef = firestore.collection('products');
   final ImagePicker _picker = ImagePicker();
   bool _saving = false;
   String _searchQuery = '';
@@ -833,7 +827,7 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(context);
-              final batch = FirebaseFirestore.instance.batch();
+              final batch = firestore.batch();
               for (var doc in docsToEdit) {
                 final newStock =
                     int.tryParse(controllers[doc.id]?.text ?? '') ?? 0;
@@ -1114,7 +1108,7 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                                         Border.all(color: Colors.blue.shade200),
                                   ),
                                   child: StreamBuilder<DocumentSnapshot>(
-                                    stream: FirebaseFirestore.instance
+                                    stream: firestore
                                         .doc('doe_latest/lpg')
                                         .snapshots(),
                                     builder: (context, snapshot) {

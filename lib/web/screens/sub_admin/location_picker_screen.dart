@@ -36,9 +36,9 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
 
   // Firebase Proxies
   static const String _autocompleteProxy =
-      'https://us-central1-daligas-bfd9b.cloudfunctions.net/placesAutocomplete';
+      'https://asia-southeast1-daligas-bfd9b.cloudfunctions.net/placesAutocomplete';
   static const String _detailsProxy =
-      'https://us-central1-daligas-bfd9b.cloudfunctions.net/placeDetails';
+      'https://asia-southeast1-daligas-bfd9b.cloudfunctions.net/placeDetails';
 
   // Search state
   List<Prediction> _predictions = [];

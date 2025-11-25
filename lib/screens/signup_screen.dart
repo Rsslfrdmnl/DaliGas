@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:daligas/screens/signin_screen.dart';
 import 'package:daligas/screens/terms_screen.dart';
 import 'package:daligas/screens/privacy_screen.dart';
+import 'package:daligas/main_mobile.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -69,7 +70,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       }
 
       // === Step 3: Save to Firestore ===
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+      await firestore.collection('users').doc(user.uid).set({
         'fullName': fullName,
         'email': email,
         'phone': phone,
@@ -290,7 +291,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
             ElevatedButton(
               onPressed: isAvailable
                   ? () async {
-                      await FirebaseFirestore.instance
+                      await firestore
                           .collection('users')
                           .doc(user.uid)
                           .set({'username': controller.text.trim()}, SetOptions(merge: true));
@@ -315,7 +316,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
   Future<bool> _usernameExists(String username) async {
     final collections = ['users', 'employees'];
     for (final col in collections) {
-      final snap = await FirebaseFirestore.instance
+      final snap = await firestore
           .collection(col)
           .where('username', isEqualTo: username)
           .limit(1)

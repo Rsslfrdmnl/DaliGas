@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:daligas/screens/home_screen.dart';
 import 'package:daligas/screens/employee_orders_screen.dart';
+import 'package:daligas/main_mobile.dart';
 
 class OTPVerificationScreen extends StatefulWidget {
   final String email;
@@ -26,7 +27,7 @@ class OTPVerificationScreen extends StatefulWidget {
 
 class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore = firebase
 
   final TextEditingController _otpController = TextEditingController();
   bool _isLoading = false;
@@ -55,7 +56,7 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
       String? username = await _showUsernameDialog();
 
       // Step 4: Save user info to Firestore
-      await _firestore.collection('users').doc(emailUser.user!.uid).set({
+      await firestore.collection('users').doc(emailUser.user!.uid).set({
         'email': widget.email,
         'phone': widget.phone,
         'username': username ?? '',
