@@ -48,7 +48,7 @@ class WelcomeScreen extends StatelessWidget {
                   );
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
+                  backgroundColor: null,
                   foregroundColor: const Color(0xFF1E2A44),
                   minimumSize: const Size(200, 50),
                 ),
@@ -64,7 +64,7 @@ class WelcomeScreen extends StatelessWidget {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF1E2A44),
-                  foregroundColor: Colors.white,
+                  foregroundColor: null,
                   minimumSize: const Size(200, 50),
                   side: const BorderSide(color: Colors.white),
                 ),

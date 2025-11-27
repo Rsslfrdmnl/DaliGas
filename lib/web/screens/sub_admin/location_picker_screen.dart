@@ -182,7 +182,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                     padding: EdgeInsets.all(16),
                     child: Text(
                       'No results found',
-                      style: TextStyle(color: Colors.grey, fontSize: 14),
+                      style: TextStyle(color: Colors.white, fontSize: 14),
                     ),
                   )
                 : ListView.separated(
@@ -201,7 +201,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                         subtitle: pred.structuredFormatting?.secondaryText != null
                             ? Text(
                                 pred.structuredFormatting!.secondaryText!,
-                                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                style: const TextStyle(fontSize: 12, color: Colors.white),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               )
@@ -357,7 +357,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
         backgroundColor: const Color(0xFF052238),
-        foregroundColor: Colors.white,
+        foregroundColor: null,
         title: const Text('Select Shop Location'),
         actions: [
           if (_loadingLocation)
@@ -427,7 +427,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                     hintText: 'Search places in Philippines...',
                     border: InputBorder.none,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                    prefixIcon: const Icon(Icons.search, color: Colors.white),
                     suffixIcon: _searching
                         ? const Padding(
                             padding: EdgeInsets.all(12.0),
@@ -484,7 +484,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                               const SizedBox(height: 4),
                               Text(
                                 '${_selectedLatLng!.latitude.toStringAsFixed(5)}, ${_selectedLatLng!.longitude.toStringAsFixed(5)}',
-                                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                style: const TextStyle(fontSize: 11, color: Colors.white),
                               ),
                             ],
                           ),

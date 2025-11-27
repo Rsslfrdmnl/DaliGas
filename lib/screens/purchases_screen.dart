@@ -152,8 +152,8 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                   final counts = snapshot.data ?? {};
                   return TabBar(
                     isScrollable: false,
-                    indicatorColor: Colors.white,
-                    labelColor: Colors.white,
+                    indicatorColor: null,
+                    labelColor: null,
                     unselectedLabelColor: Colors.white70,
                     labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                     unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 13),
@@ -217,7 +217,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       data: Theme.of(context).copyWith(splashColor: Colors.transparent, highlightColor: Colors.transparent),
       child: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.white,
+        backgroundColor: null,
         currentIndex: widget.currentIndex,
         selectedItemColor: const Color(0xFF0D2236),
         unselectedItemColor: Colors.black,
@@ -365,7 +365,7 @@ class PurchasesTab extends StatelessWidget {
                           children: [
                             Text(productName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w500)),
                             const SizedBox(height: 2),
-                            Text('$itemCount ${itemCount > 1 ? 'items' : 'item'} • $paymentMethod', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            Text('$itemCount ${itemCount > 1 ? 'items' : 'item'} • $paymentMethod', style: const TextStyle(fontSize: 12, color: Colors.white)),
                             const SizedBox(height: 4),
                             Text('₱${total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                           ],
@@ -406,11 +406,11 @@ class PurchasesTab extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(height: 14, width: 120, color: Colors.grey[600]),
+                    Container(height: 14, width: 120, color: Colors.white),
                     const SizedBox(height: 8),
-                    Container(height: 12, width: 80, color: Colors.grey[600]),
+                    Container(height: 12, width: 80, color: Colors.white),
                     const SizedBox(height: 8),
-                    Container(height: 16, width: 60, color: Colors.grey[600]),
+                    Container(height: 16, width: 60, color: Colors.white),
                   ],
                 ),
               ),

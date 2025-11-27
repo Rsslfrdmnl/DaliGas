@@ -348,7 +348,7 @@ Future<void> _navigateAfterLoginByPhone(String phone) async {
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _sendCode,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
+                    backgroundColor: null,
                     foregroundColor: const Color(0xFF0D2236),
                     minimumSize: const Size(220, 50),
                     shape: RoundedRectangleBorder(
@@ -410,7 +410,7 @@ Future<void> _navigateAfterLoginByPhone(String phone) async {
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _verifyCode,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
+                    backgroundColor: null,
                     foregroundColor: const Color(0xFF0D2236),
                     minimumSize: const Size(220, 50),
                     shape: RoundedRectangleBorder(

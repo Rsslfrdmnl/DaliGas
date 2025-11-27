@@ -196,7 +196,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                                   fit: BoxFit.contain,
                                                   width: double.infinity,
                                                   errorBuilder: (_, __, ___) => const Center(
-                                                    child: Icon(Icons.image_not_supported, color: Colors.grey, size: 40),
+                                                    child: Icon(Icons.image_not_supported, color: Colors.white, size: 40),
                                                   ),
                                                 ),
                                               ),

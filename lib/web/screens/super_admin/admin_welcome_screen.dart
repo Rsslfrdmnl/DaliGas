@@ -127,7 +127,7 @@ class _AdminWelcomeScreenState extends State<AdminWelcomeScreen> {
                 decoration: const InputDecoration(
                   hintText: "Email",
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: null,
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -144,7 +144,7 @@ class _AdminWelcomeScreenState extends State<AdminWelcomeScreen> {
                 decoration: const InputDecoration(
                   hintText: "Password",
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: null,
                   border: OutlineInputBorder(),
                 ),
               ),

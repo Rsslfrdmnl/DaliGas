@@ -98,7 +98,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
         title: const Text('Delete Items', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         content: const Text('Are you sure you want to delete the selected items?', style: TextStyle(color: Colors.white70)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(_, false), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+          TextButton(onPressed: () => Navigator.pop(_, false), child: const Text('Cancel', style: TextStyle(color: Colors.white))),
           TextButton(onPressed: () => Navigator.pop(_, true), child: const Text('Delete', style: TextStyle(color: Colors.red))),
         ],
       ),
@@ -191,7 +191,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
                                             selectedIds = selectAll ? items.map((e) => e.id).toSet() : {};
                                           });
                                         },
-                                        activeColor: Colors.white,
+                                        activeColor: null,
                                         checkColor: Colors.black,
                                       ),
                                       const Text('Select All', style: TextStyle(color: Colors.white)),
@@ -254,7 +254,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
                                   ? Row(
                                       children: [
                                         ElevatedButton.icon(
-                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: null),
                                           onPressed: selectedIds.isEmpty ? null : () => _confirmDelete(selectedIds.toList()),
                                           icon: const Icon(Icons.delete),
                                           label: const Text('Delete Selected'),
@@ -271,7 +271,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
                                         ElevatedButton(
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: const Color(0xFF0D2236),
-                                            foregroundColor: Colors.white,
+                                            foregroundColor: null,
                                             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                                           ),
                                           onPressed: selectedIds.isEmpty
@@ -342,7 +342,7 @@ class _CartTile extends StatelessWidget {
       onTap: onSelected,
       child: Container(
         decoration: BoxDecoration(
-          color: selected ? Colors.lightBlue.shade50 : Colors.white,
+          color: selected ? Colors.lightBlue.shade50 : null,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: selected ? Colors.blueAccent : Colors.transparent, width: 1.5),
         ),

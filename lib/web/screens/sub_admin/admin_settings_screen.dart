@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:daligas/web/screens/super_admin/admin_welcome_screen.dart';
+import 'package:daligas/web/main_web.dart';
 import 'admin_dashboard_screen.dart';
 import 'admin_orders_screen.dart';
 import 'admin_inventory_screen.dart';
 import 'admin_delivery_screen.dart';
 import 'admin_feedbacks_screen.dart';
 import 'admin_reports_screen.dart';
+
+final FirebaseAuth auth = FirebaseAuth.instance;
 
 class AdminSettingsScreen extends StatefulWidget {
   const AdminSettingsScreen({super.key});
@@ -16,13 +20,111 @@ class AdminSettingsScreen extends StatefulWidget {
 }
 
 class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
-  bool _darkModeEnabled = false;
-  final _nameController = TextEditingController(text: "Admin User");
-  final _emailController = TextEditingController(text: "admin@daligas.com");
+  late User? currentUser;
+  DocumentSnapshot? adminDoc;
+
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
   final _oldPassController = TextEditingController();
   final _newPassController = TextEditingController();
 
-  // ✅ Logout
+  bool _darkModeEnabled = false;
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    currentUser = auth.currentUser;
+    _loadAdminData();
+  }
+
+  Future<void> _loadAdminData() async {
+    if (currentUser == null) return;
+
+    try {
+      final doc = await firestore.collection('admins').doc(currentUser!.uid).get();
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        setState(() {
+          adminDoc = doc;
+          _nameController.text = data['name'] ?? 'Admin User';
+          _emailController.text = data['email'] ?? currentUser!.email ?? '';
+          _darkModeEnabled = data['darkMode'] ?? false;
+        });
+      }
+    } catch (e) {
+      print("Error loading admin data: $e");
+    }
+  }
+
+  Future<void> _saveSettings() async {
+    if (currentUser == null) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      // Update Firestore
+      await firestore.collection('admins').doc(currentUser!.uid).set({
+        'name': _nameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'darkMode': _darkModeEnabled,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // Update email in Firebase Auth if changed
+      if (_emailController.text.trim() != currentUser!.email) {
+        await currentUser!.updateEmail(_emailController.text.trim());
+      }
+
+      // Change password if both fields filled
+      if (_oldPassController.text.isNotEmpty && _newPassController.text.isNotEmpty) {
+        if (_newPassController.text.length < 6) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("New password must be at least 6 characters")),
+          );
+          setState(() => _isLoading = false);
+          return;
+        }
+
+        final credential = EmailAuthProvider.credential(
+          email: currentUser!.email!,
+          password: _oldPassController.text,
+        );
+
+        await currentUser!.reauthenticateWithCredential(credential);
+        await currentUser!.updatePassword(_newPassController.text);
+
+        _oldPassController.clear();
+        _newPassController.clear();
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Settings saved successfully!"),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } on FirebaseAuthException catch (e) {
+      String message = "Failed to save settings";
+      if (e.code == 'wrong-password') {
+        message = "Old password is incorrect";
+      } else if (e.code == 'email-already-in-use') {
+        message = "Email is already in use";
+      } else if (e.code == 'requires-recent-login') {
+        message = "Please log out and log in again to change sensitive info";
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.red),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
     if (context.mounted) {
@@ -33,52 +135,32 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     }
   }
 
-  void _saveSettings() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Settings saved successfully!")),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Row(
+  Widget _buildSidebar(BuildContext context) {
+    return Container(
+      width: 220,
+      color: const Color(0xFF0D2236),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ---- Sidebar ----
-          Container(
-            width: 220,
-            color: const Color(0xFF0D2236),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 40),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Transform.translate(
-                      offset: const Offset(-10, 0),
-                      child: Image.asset(
-                        "assets/images/daligas_logo.png",
-                        height: 80,
-                      ),
-                    ),
-                    Transform.translate(
-                      offset: const Offset(-22, 0),
-                      child: const Text(
-                        "DALI GAS",
-                        style: TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ],
+          const SizedBox(height: 40),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Transform.translate(
+                offset: const Offset(-10, 0),
+                child: Image.asset("assets/images/daligas_logo.png", height: 80),
+              ),
+              Transform.translate(
+                offset: const Offset(-22, 0),
+                child: const Text(
+                  "DALI GAS",
+                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.white),
                 ),
-                const SizedBox(height: 30),
+              ),
+            ],
+          ),
+          const SizedBox(height: 30),
 
-                // Sidebar Items
           _SidebarItem(Icons.dashboard, "Dashboard", false, () {
             Navigator.pushReplacement(
               context,
@@ -93,7 +175,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
             Navigator.pushReplacement(
               context,
               PageRouteBuilder(
-                pageBuilder: (_, __, ___) => const AdminOrdersScreen(),
+                pageBuilder: (_, __, ___) => const AdminInventoryScreen(),
                 transitionDuration: Duration.zero,
                 reverseTransitionDuration: Duration.zero,
               ),
@@ -129,7 +211,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
               ),
             );
           }),
-          _SidebarItem(Icons.assignment, "Reports", false, () {
+          _SidebarItem(Icons.flag, "User Reports", false, () {
             Navigator.pushReplacement(
               context,
               PageRouteBuilder(
@@ -146,126 +228,104 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
           const SizedBox(height: 20),
         ],
       ),
-    ),
+    );
+  }
 
-          // ---- Main Content ----
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Row(
+        children: [
+          _buildSidebar(context),
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(24, 50, 24, 24),
+
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    "Settings",
-                    style: TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  const Text("Settings", style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 30),
 
-                  // ---- Account Info ----
+                  // Account Information
                   Card(
                     elevation: 2,
                     child: Padding(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(24),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            "Account Information",
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                          const Text("Account Information", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 20),
-                          _buildTextField("Full Name", _nameController),
-                          const SizedBox(height: 20),
-                          _buildTextField("Email Address", _emailController),
+                          _buildTextField("Full Name", _nameController, icon: Icons.person),
+                          const SizedBox(height: 16),
+                          _buildTextField("Email Address", _emailController, icon: Icons.email),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 30),
 
-                  // ---- Change Password ----
+                  // Change Password
                   Card(
                     elevation: 2,
                     child: Padding(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(24),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            "Change Password",
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                          const Text("Change Password", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 20),
-                          _buildTextField("Old Password", _oldPassController,
-                              obscureText: true),
-                          const SizedBox(height: 20),
-                          _buildTextField("New Password", _newPassController,
-                              obscureText: true),
+                          _buildTextField("Current Password", _oldPassController, obscureText: true, icon: Icons.lock),
+                          const SizedBox(height: 16),
+                          _buildTextField("New Password", _newPassController, obscureText: true, icon: Icons.lock_outline),
+                          const SizedBox(height: 8),
+                          Text(" Leave blank if you don't want to change password", style: TextStyle(color: Colors.black, fontSize: 13)),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 30),
 
-                  // ---- Preferences ----
+                  // Preferences
                   Card(
                     elevation: 2,
                     child: Padding(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(24),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            "Preferences",
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                          const Text("Preferences", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 20),
                           SwitchListTile(
                             title: const Text("Enable Dark Mode"),
+                            subtitle: const Text("Switch to dark theme across the admin panel"),
                             activeColor: const Color(0xFF0D2236),
                             value: _darkModeEnabled,
-                            onChanged: (val) {
+                            onChanged: (val) async {
                               setState(() => _darkModeEnabled = val);
+                              await ThemeManager().setDarkMode(val);
                             },
                           ),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: 30),
+                  const SizedBox(height: 40),
 
-                  // ---- Save Button ----
+                  // Save Button
                   Align(
                     alignment: Alignment.centerRight,
-                    child: ElevatedButton(
-                      onPressed: _saveSettings,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0D2236),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 30,
-                          vertical: 14,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                      ),
-                      child: const Text(
-                        "Save Changes",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
+                    child: SizedBox(
+                      width: 200,
+                      child: ElevatedButton.icon(
+                        onPressed: _isLoading ? null : _saveSettings,
+                        icon: _isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.save),
+                        label: Text(_isLoading ? "Saving..." : "Save Changes"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0D2236),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
                       ),
                     ),
@@ -280,35 +340,37 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   }
 
   Widget _buildTextField(String label, TextEditingController controller,
-      {bool obscureText = false}) {
+      {bool obscureText = false, IconData? icon}) {
     return TextField(
       controller: controller,
       obscureText: obscureText,
+      enabled: !_isLoading,
       decoration: InputDecoration(
         labelText: label,
-        border: const OutlineInputBorder(),
+        prefixIcon: icon != null ? Icon(icon, color: const Color(0xFF0D2236)) : null,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFF0D2236), width: 2),
+        ),
       ),
     );
   }
 }
 
-/// ✅ Sidebar Item with Hover
+// Your original SidebarItem – unchanged
 class _SidebarItem extends StatefulWidget {
   final IconData icon;
   final String title;
   final bool active;
   final VoidCallback onTap;
-
-  const _SidebarItem(this.icon, this.title, this.active, this.onTap, {Key? key})
-      : super(key: key);
-
+  const _SidebarItem(this.icon, this.title, this.active, this.onTap, {Key? key}) : super(key: key);
   @override
   State<_SidebarItem> createState() => _SidebarItemState();
 }
 
 class _SidebarItemState extends State<_SidebarItem> {
   bool _hovering = false;
-
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
@@ -318,12 +380,8 @@ class _SidebarItemState extends State<_SidebarItem> {
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         decoration: BoxDecoration(
-          color: _hovering
-              ? Colors.white.withOpacity(0.15)
-              : (widget.active
-                  ? Colors.white.withOpacity(0.1)
-                  : Colors.transparent),
-          borderRadius: BorderRadius.circular(4),
+          color: widget.active ? Colors.white.withOpacity(0.1) : (_hovering ? Colors.white.withOpacity(0.15) : Colors.transparent),
+          borderRadius: BorderRadius.circular(6),
         ),
         child: ListTile(
           leading: Icon(widget.icon, color: Colors.white),

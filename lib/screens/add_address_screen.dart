@@ -122,12 +122,12 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: null,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
         content: Text(content),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.white))),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
@@ -357,7 +357,7 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
                 child: ElevatedButton(
                   onPressed: _isSaving ? null : _saveAddress,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
+                    backgroundColor: null,
                     foregroundColor: const Color(0xFF052238),
                     elevation: 3,
                     padding: const EdgeInsets.symmetric(vertical: 16),

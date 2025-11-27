@@ -239,7 +239,7 @@ void initState() {
       appBar: AppBar(
         title: Text('Live Tracking - #${widget.orderId.substring(widget.orderId.length - 12)}'),
         backgroundColor: const Color(0xFF052238),
-        foregroundColor: Colors.white,
+        foregroundColor: null,
       ),
       body: Stack(
         children: [
@@ -701,7 +701,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF052238),
         title: const Text('Order Details'),
-        foregroundColor: Colors.white,
+        foregroundColor: null,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -864,14 +864,14 @@ if (status == 'Processing')
                           fontWeight: FontWeight.w600,
                           color: isGcashPaid
                               ? Colors.white.withOpacity(0.45)
-                              : Colors.white,
+                              : null,
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: isGcashPaid
                             ? Colors.white.withOpacity(0.08)     // Very subtle fill (transparent look)
                             : const Color(0xFF8B0000),
-                        foregroundColor: Colors.white,
+                        foregroundColor: null,
                         disabledBackgroundColor: Colors.white.withOpacity(0.08),
                         disabledForegroundColor: Colors.white.withOpacity(0.45),
                         side: isGcashPaid
@@ -898,7 +898,7 @@ if (status == 'Processing')
                     label: const Text('Buy Again'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1B5E20),
-                      foregroundColor: Colors.white,
+                      foregroundColor: null,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),

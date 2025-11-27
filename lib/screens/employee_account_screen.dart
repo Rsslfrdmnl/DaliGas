@@ -255,7 +255,7 @@ class _EmployeeAccountScreenState extends State<EmployeeAccountScreen>
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(
                           side: const BorderSide(color: Colors.white),
-                          foregroundColor: Colors.white,
+                          foregroundColor: null,
                         ),
                         onPressed: () async {
                           await _auth.signOut();
@@ -280,7 +280,7 @@ class _EmployeeAccountScreenState extends State<EmployeeAccountScreen>
           ),
           child: BottomNavigationBar(
             type: BottomNavigationBarType.fixed,
-            backgroundColor: Colors.white,
+            backgroundColor: null,
             currentIndex: widget.currentIndex,
             selectedItemColor: const Color(0xFF0D2236),
             unselectedItemColor: Colors.black,
@@ -505,7 +505,7 @@ class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: null),
             child: const Text('Verify', style: TextStyle(color: Color(0xFF0D2236))),
           ),
         ],
@@ -554,7 +554,7 @@ class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
         AndroidUiSettings(
           toolbarTitle: 'Crop Image',
           toolbarColor: const Color(0xFF052238),
-          toolbarWidgetColor: Colors.white,
+          toolbarWidgetColor: null,
           lockAspectRatio: true,
         ),
         IOSUiSettings(title: 'Crop Image'),
@@ -770,7 +770,7 @@ class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
               child: ListTile(
                 title: const Text('Email', style: TextStyle(fontSize: 12, color: Colors.black54)),
                 subtitle: Text(emailToShow, style: const TextStyle(color: Colors.black87)),
-                trailing: const Icon(Icons.lock, color: Colors.grey),
+                trailing: const Icon(Icons.lock, color: Colors.white),
               ),
             ),
 
@@ -797,7 +797,7 @@ class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
                 ),
                 trailing: phoneLinked
                     ? const Icon(Icons.check_circle, color: Colors.green)
-                    : const Icon(Icons.help_outline, color: Colors.grey),
+                    : const Icon(Icons.help_outline, color: Colors.white),
               ),
             ),
 
@@ -818,7 +818,7 @@ class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
                     label: Text(isVerifyingPhone ? 'Sending OTP...' : 'Verify Phone'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
+                      foregroundColor: null,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
                   ),
@@ -832,7 +832,7 @@ class _EmployeeProfileScreenState extends State<EmployeeProfileScreen> {
               child: ElevatedButton(
                 onPressed: isSaving ? null : _saveProfile,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
+                  backgroundColor: null,
                   foregroundColor: const Color(0xFF052238),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),

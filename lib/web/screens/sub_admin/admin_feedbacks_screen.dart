@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:daligas/web/main_web.dart'; // ← This gives us 'firestore'
+import 'package:daligas/web/main_web.dart';
 import 'package:daligas/web/screens/super_admin/admin_welcome_screen.dart';
 
 import 'admin_dashboard_screen.dart';
@@ -22,13 +22,19 @@ class AdminFeedbackScreen extends StatefulWidget {
 class _AdminFeedbackScreenState extends State<AdminFeedbackScreen> {
   String searchQuery = '';
   int currentPage = 0;
-  final int itemsPerPage = 8;
+  final int itemsPerPage = 4;
   final TextEditingController searchController = TextEditingController();
+
+  final Map<String, String> _productCache = {};
+  final Map<String, String> _userCache = {};
 
   Future<void> _logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
     if (context.mounted) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => AdminWelcomeScreen()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => AdminWelcomeScreen()),
+      );
     }
   }
 
@@ -40,7 +46,10 @@ class _AdminFeedbackScreenState extends State<AdminFeedbackScreen> {
         content: const Text("This action cannot be undone."),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Delete", style: TextStyle(color: Colors.red))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Delete", style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
@@ -53,11 +62,68 @@ class _AdminFeedbackScreenState extends State<AdminFeedbackScreen> {
           .doc(reviewId)
           .delete();
 
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Review deleted"), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+Future<void> _replyToReview(String productId, String reviewId, String userId, String currentComment) async {
+  final TextEditingController replyController = TextEditingController();
+
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text("Reply to Review"),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text("Original comment:", style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Text(currentComment, maxLines: 4, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 16),
+          TextField(
+            controller: replyController,
+            maxLines: 4,
+            decoration: InputDecoration(
+              hintText: "Write your reply...",
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text("Send Reply"),
+        ),
+      ],
+    ),
+  );
+
+  if (result == true && replyController.text.trim().isNotEmpty) {
+    await firestore
+        .collection('products')
+        .doc(productId)
+        .collection('reviews')
+        .doc(reviewId)
+        .update({
+      'adminReply': replyController.text.trim(),
+      'repliedAt': FieldValue.serverTimestamp(),
+      'hasReply': true,
+    });
+
+    // Optional: send notification to user here later
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Review deleted"), backgroundColor: Colors.red),
+        const SnackBar(content: Text("Reply sent successfully"), backgroundColor: Colors.green),
       );
     }
   }
+}
 
   Widget _buildSidebar(BuildContext context) {
     return Container(
@@ -87,7 +153,7 @@ class _AdminFeedbackScreenState extends State<AdminFeedbackScreen> {
           _SidebarItem(Icons.inventory, "Inventory", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminInventoryScreen(), transitionDuration: Duration.zero))),
           _SidebarItem(Icons.local_shipping, "Delivery Management", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminDeliveryScreen(), transitionDuration: Duration.zero))),
           _SidebarItem(Icons.feedback, "Feedback", true, () {}),
-          _SidebarItem(Icons.assignment, "Reports", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminReportsScreen(), transitionDuration: Duration.zero))),
+          _SidebarItem(Icons.flag, "User Reports", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminReportsScreen(), transitionDuration: Duration.zero))),
           _SidebarItem(Icons.settings, "Settings", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminSettingsScreen(), transitionDuration: Duration.zero))),
           const Spacer(),
           _SidebarItem(Icons.logout, "Logout", false, () => _logout(context)),
@@ -97,6 +163,7 @@ class _AdminFeedbackScreenState extends State<AdminFeedbackScreen> {
     );
   }
 
+  // YOUR ORIGINAL ICON-BASED STAT CARDS — UNTOUCHED & PERFECT
   Widget _statCard(IconData icon, String value, String label) {
     return Expanded(
       child: Card(
@@ -133,7 +200,7 @@ class _AdminFeedbackScreenState extends State<AdminFeedbackScreen> {
                   const Text("Feedbacks", style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.black)),
                   const SizedBox(height: 20),
 
-                  // Live Stats
+                  // YOUR ORIGINAL ICON STATS — NOW WITH REAL LOW RATINGS
                   StreamBuilder<QuerySnapshot>(
                     stream: firestore.collectionGroup('reviews').snapshots(),
                     builder: (context, snapshot) {
@@ -142,22 +209,15 @@ class _AdminFeedbackScreenState extends State<AdminFeedbackScreen> {
                       }
 
                       final reviews = snapshot.data!.docs;
-
-                      // Safely calculate stats
                       final total = reviews.length;
-
                       final sum = reviews.fold<double>(0.0, (prev, doc) {
-                        final rating = doc['rating'];
-                        if (rating is num) {
-                          return prev + rating.toDouble();
-                        }
-                        return prev; // skip null or invalid
+                        final rating = (doc.data() as Map<String, dynamic>)['rating'];
+                        return rating is num ? prev + rating.toDouble() : prev;
                       });
-
                       final avg = total > 0 ? (sum / total).toStringAsFixed(1) : "0.0";
 
                       final lowRatings = reviews.where((doc) {
-                        final rating = doc['rating'];
+                        final rating = (doc.data() as Map<String, dynamic>)['rating'];
                         return rating is num && rating <= 3;
                       }).length;
 
@@ -176,138 +236,312 @@ class _AdminFeedbackScreenState extends State<AdminFeedbackScreen> {
                   ),
                   const SizedBox(height: 30),
 
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text("Customer Reviews", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                      ElevatedButton(
-                        onPressed: () {}, // Export logic later
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0D2236),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                          elevation: 0,
-                        ),
-                        child: const Text("Export", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Search
-                  TextField(
-                    controller: searchController,
-                    onChanged: (val) => setState(() => searchQuery = val.toLowerCase()),
-                    decoration: InputDecoration(
-                      hintText: "Search by customer, product, or comment...",
-                      prefixIcon: const Icon(Icons.search),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Real-time Reviews Table
+                  // EXACT SAME CARD + PAGINATOR AS ORDERS SCREEN — NO MORE CHANGES
                   Expanded(
-                    child: StreamBuilder<QuerySnapshot>(
-                      stream: firestore.collectionGroup('reviews').orderBy('createdAt', descending: true).snapshots(),
-                      builder: (context, snapshot) {
-                        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-                        var docs = snapshot.data!.docs;
-
-                        // Search filter
-                        if (searchQuery.isNotEmpty) {
-                          docs = docs.where((doc) {
-                            final data = doc.data() as Map<String, dynamic>;
-                            final comment = (data['comment'] ?? '').toString().toLowerCase();
-                            final rating = data['rating']?.toString() ?? '';
-                            return comment.contains(searchQuery) || rating.contains(searchQuery);
-                          }).toList();
-                        }
-
-                        final totalPages = (docs.length / itemsPerPage).ceil();
-                        final start = currentPage * itemsPerPage;
-                        final pageDocs = docs.length > start ? docs.sublist(start, (start + itemsPerPage).clamp(0, docs.length)) : <QueryDocumentSnapshot>[];
-
-                        return Column(
+                    child: Card(
+                      elevation: 3,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
                           children: [
-                            Expanded(
-                              child: Card(
-                                elevation: 2,
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: DataTable(
-                                    columnSpacing: 40,
-                                    columns: const [
-                                      DataColumn(label: Text("Review ID")),
-                                      DataColumn(label: Text("Product")),
-                                      DataColumn(label: Text("Customer")),
-                                      DataColumn(label: Text("Rating")),
-                                      DataColumn(label: Text("Comment")),
-                                      DataColumn(label: Text("Date Submitted")),
-                                      DataColumn(label: Text("Action")),
-                                    ],
-                                    rows: pageDocs.map((doc) {
-                                      final data = doc.data() as Map<String, dynamic>;
-                                      final productId = doc.reference.parent.parent!.id;
-                                      final reviewId = doc.id;
-                                      final rating = (data['rating'] as num?)?.toInt() ?? 0;
-                                      final timestamp = (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
-
-                                      return DataRow(cells: [
-                                        DataCell(Text(reviewId.substring(0, 8).toUpperCase())),
-                                        DataCell(FutureBuilder<DocumentSnapshot>(
-                                          future: firestore.collection('products').doc(productId).get(),
-                                          builder: (context, snap) => Text(snap.data?.exists == true ? snap.data!['title'] ?? 'Unknown' : 'Loading...'),
-                                        )),
-                                        DataCell(FutureBuilder<DocumentSnapshot>(
-                                          future: firestore.collection('users').doc(data['userId']).get(),
-                                          builder: (context, snap) => Text(snap.data?.exists == true ? snap.data!['fullName'] ?? 'Anonymous' : 'Loading...'),
-                                        )),
-                                        DataCell(Row(
-                                          children: List.generate(5, (i) => Icon(
-                                            i < rating ? Icons.star : Icons.star_border,
-                                            color: Colors.amber,
-                                            size: 18,
-                                          )),
-                                        )),
-                                        DataCell(SizedBox(
-                                          width: 220,
-                                          child: Text(
-                                            data['comment'] ?? 'No comment',
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        )),
-                                        DataCell(Text(DateFormat('MM-dd-yyyy').format(timestamp))),
-                                        DataCell(IconButton(
-                                          icon: const Icon(Icons.delete, color: Colors.red),
-                                          tooltip: "Delete Review",
-                                          onPressed: () => _deleteReview(productId, reviewId),
-                                        )),
-                                      ]);
-                                    }).toList(),
-                                  ),
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 24),
+                              child: TextField(
+                                controller: searchController,
+                                onChanged: (val) {
+                                  setState(() {
+                                    searchQuery = val.toLowerCase();
+                                    currentPage = 0;
+                                  });
+                                },
+                                decoration: InputDecoration(
+                                  hintText: "Search by customer, product, or comment...",
+                                  prefixIcon: const Icon(Icons.search),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                 ),
                               ),
                             ),
 
-                            // Pagination
-                            if (totalPages > 1)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 16),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    IconButton(onPressed: currentPage > 0 ? () => setState(() => currentPage--) : null, icon: const Icon(Icons.chevron_left)),
-                                    Text("Page ${currentPage + 1} of $totalPages"),
-                                    IconButton(onPressed: currentPage < totalPages - 1 ? () => setState(() => currentPage++) : null, icon: const Icon(Icons.chevron_right)),
-                                  ],
-                                ),
+                            Expanded(
+                              child: StreamBuilder<QuerySnapshot>(
+                                stream: firestore.collectionGroup('reviews').orderBy('createdAt', descending: true).snapshots(),
+                                builder: (context, snapshot) {
+                                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+                                  var filtered = snapshot.data!.docs.where((doc) {
+                                    final data = doc.data() as Map<String, dynamic>;
+                                    final comment = (data['review'] ?? data['comment'] ?? '').toString().toLowerCase();
+                                    final productId = doc.reference.parent.parent!.id;
+                                    final userId = data['userId'] as String?;
+                                    final productName = _productCache[productId]?.toLowerCase() ?? '';
+                                    final userName = _userCache[userId]?.toLowerCase() ?? '';
+                                    return comment.contains(searchQuery) || productName.contains(searchQuery) || userName.contains(searchQuery);
+                                  }).toList();
+
+                                  final totalPages = (filtered.length / itemsPerPage).ceil();
+                                  final start = currentPage * itemsPerPage;
+                                  final pageItems = filtered.length > start
+                                      ? filtered.sublist(start, (start + itemsPerPage).clamp(0, filtered.length))
+                                      : <QueryDocumentSnapshot>[];
+
+                                  return Column(
+                                    children: [
+                                      Expanded(
+                                        child: SingleChildScrollView(
+                                          child: Container(
+                                            width: double.infinity,
+                                            decoration: BoxDecoration(
+                                              border: Border.all(color: Colors.grey.shade300),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: DataTable(
+                                              headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
+                                              dataRowHeight: 70,
+                                              headingRowHeight: 50,
+                                              horizontalMargin: 16,
+                                              columnSpacing: 32,
+                                              border: TableBorder(horizontalInside: BorderSide(color: Colors.grey.shade300, width: 1)),
+                                              columns: const [
+                                                DataColumn(label: Text("Review ID", style: TextStyle(fontWeight: FontWeight.w600))),
+                                                DataColumn(label: Text("Product", style: TextStyle(fontWeight: FontWeight.w600))),
+                                                DataColumn(label: Text("Customer", style: TextStyle(fontWeight: FontWeight.w600))),
+                                                DataColumn(label: Text("Rating", style: TextStyle(fontWeight: FontWeight.w600))),
+                                                DataColumn(label: Text("Comment", style: TextStyle(fontWeight: FontWeight.w600))),
+                                                DataColumn(label: Text("Date Submitted", style: TextStyle(fontWeight: FontWeight.w600))),
+                                                DataColumn(label: Text("Action", style: TextStyle(fontWeight: FontWeight.w600))),
+                                              ],
+                                              rows: pageItems.map((doc) {
+                                                final data = doc.data() as Map<String, dynamic>;
+                                                final productId = doc.reference.parent.parent!.id;
+                                                final userId = data['userId'] as String?;
+                                                final reviewId = doc.id;
+                                                final rating = (data['rating'] as num?)?.toInt() ?? 0;
+                                                final timestamp = (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+
+                                                return DataRow(cells: [
+                                                  DataCell(Text(reviewId.substring(0, 8).toUpperCase())),
+                                                  DataCell(FutureBuilder<String>(
+                                                    future: _productCache.containsKey(productId)
+                                                        ? Future.value(_productCache[productId]!)
+                                                        : firestore.collection('products').doc(productId).get().then((s) {
+                                                            final n = s.exists ? (s.data()?['name'] ?? 'Unknown') : 'Deleted';
+                                                            _productCache[productId] = n;
+                                                            return n;
+                                                          }),
+                                                    builder: (_, snap) => Text(snap.data ?? "Loading..."),
+                                                  )),
+                                                  DataCell(FutureBuilder<String>(
+                                                    future: userId == null
+                                                        ? Future.value("Anonymous")
+                                                        : _userCache.containsKey(userId)
+                                                            ? Future.value(_userCache[userId]!)
+                                                            : firestore.collection('users').doc(userId).get().then((s) {
+                                                                final n = s.exists ? (s.data()?['fullName'] ?? 'Anonymous') : 'Deleted';
+                                                                _userCache[userId] = n;
+                                                                return n;
+                                                              }),
+                                                    builder: (_, snap) => Text(snap.data ?? "Loading..."),
+                                                  )),
+                                                  DataCell(Row(
+                                                    children: List.generate(5, (i) => Icon(
+                                                          i < rating ? Icons.star : Icons.star_border,
+                                                          color: Colors.amber,
+                                                          size: 20,
+                                                        )),
+                                                  )),
+                                                  DataCell(
+                                                    GestureDetector(
+                                                      onTap: () {
+                                                        // ← Your existing full review dialog code stays exactly the same
+                                                        showDialog(
+                                                          context: context,
+                                                          builder: (context) => AlertDialog(
+                                                            title: Row(
+                                                              children: [
+                                                                const Icon(Icons.rate_review, color: Colors.amber),
+                                                                const SizedBox(width: 10),
+                                                                const Text("Full Review", style: TextStyle(fontWeight: FontWeight.bold)),
+                                                              ],
+                                                            ),
+                                                            content: FutureBuilder<Map<String, String>>(
+                                                              future: Future(() async {
+                                                                final productName = _productCache.containsKey(productId)
+                                                                    ? _productCache[productId]!
+                                                                    : await firestore.collection('products').doc(productId).get().then((s) => s.exists ? (s.data()?['name'] ?? 'Unknown') : 'Deleted');
+                                                                final userName = userId == null
+                                                                    ? "Anonymous"
+                                                                    : _userCache.containsKey(userId)
+                                                                        ? _userCache[userId]!
+                                                                        : await firestore.collection('users').doc(userId!).get().then((s) => s.exists ? (s.data()?['fullName'] ?? 'Anonymous') : 'Deleted');
+                                                                return {'product': productName, 'user': userName};
+                                                              }),
+                                                              builder: (context, snap) {
+                                                                final names = snap.data ?? {'product': 'Loading...', 'user': 'Loading...'};
+                                                                return Column(
+                                                                  mainAxisSize: MainAxisSize.min,
+                                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                                  children: [
+                                                                    Text("Product: ${names['product']}", style: const TextStyle(fontWeight: FontWeight.w600)),
+                                                                    const SizedBox(height: 6),
+                                                                    Text("Customer: ${names['user']}", style: const TextStyle(fontWeight: FontWeight.w600)),
+                                                                    const SizedBox(height: 12),
+                                                                    const Text("Rating:", style: TextStyle(fontWeight: FontWeight.bold)),
+                                                                    Row(
+                                                                      children: List.generate(5, (i) => Icon(
+                                                                            i < rating ? Icons.star : Icons.star_border,
+                                                                            color: Colors.amber,
+                                                                            size: 24,
+                                                                          )),
+                                                                    ),
+                                                                    const SizedBox(height: 12),
+                                                                    const Text("Comment:", style: TextStyle(fontWeight: FontWeight.bold)),
+                                                                    const SizedBox(height: 8),
+                                                                    Text(
+                                                                      data['review'] ?? data['comment'] ?? 'No comment',
+                                                                      style: const TextStyle(fontSize: 15),
+                                                                    ),
+                                                  
+                                                                    // Show admin reply if exists
+                                                                    if (data['adminReply'] != null && data['adminReply'].toString().isNotEmpty) ...[
+                                                                      const SizedBox(height: 16),
+                                                                      const Text("Your Reply:", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                                                                      const SizedBox(height: 8),
+                                                                      Container(
+                                                                        width: double.infinity,
+                                                                        padding: const EdgeInsets.all(12),
+                                                                        decoration: BoxDecoration(
+                                                                          color: Colors.green.shade50,
+                                                                          border: Border(left: BorderSide(color: Colors.green, width: 4)),
+                                                                          borderRadius: BorderRadius.circular(8),
+                                                                        ),
+                                                                        child: Text(
+                                                                          data['adminReply'].toString(),
+                                                                          style: const TextStyle(fontSize: 14, color: Colors.black87),
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                  
+                                                                    const SizedBox(height: 12),
+                                                                    Text("Date: ${DateFormat('MMMM d, yyyy • hh:mm a').format(timestamp)}", style: TextStyle(color: Colors.black)),
+                                                                  ],
+                                                                );
+                                                              },
+                                                            ),
+                                                            actions: [
+                                                              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Close")),
+                                                            ],
+                                                          ),
+                                                        );
+                                                      },
+                                                      child: Row(
+                                                        children: [
+                                                          Expanded(
+                                                            child: Text(
+                                                              () {
+                                                                final comment = (data['review'] ?? data['comment'] ?? 'No comment').toString();
+                                                                return comment.length > 40
+                                                                    ? "${comment.substring(0, 40)}... (View Full)"
+                                                                    : comment;
+                                                              }(),
+                                                              style: TextStyle(
+                                                                color: Colors.blue[700],
+                                                                decoration: TextDecoration.underline,
+                                                                fontWeight: FontWeight.w500,
+                                                              ),
+                                                              maxLines: 2,
+                                                              overflow: TextOverflow.ellipsis,
+                                                            ),
+                                                          ),
+                                                          // Replied Badge
+                                                          if (data['hasReply'] == true)
+                                                            Container(
+                                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                              decoration: BoxDecoration(
+                                                                color: Colors.green,
+                                                                borderRadius: BorderRadius.circular(12),
+                                                              ),
+                                                              child: const Text(
+                                                                "Replied",
+                                                                style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                                              ),
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  DataCell(Text(DateFormat('MMMM d, yyyy').format(timestamp))),
+                                                  DataCell(
+                                                    Row(
+                                                      mainAxisAlignment: MainAxisAlignment.center,
+                                                      children: [
+                                                        // Reply Button
+                                                        IconButton(
+                                                          tooltip: "Reply",
+                                                          icon: const Icon(Icons.reply, color: Colors.blue),
+                                                          onPressed: () {
+                                                            final comment = data['review'] ?? data['comment'] ?? '';
+                                                            _replyToReview(productId, reviewId, userId ?? '', comment);
+                                                          },
+                                                        ),
+                                                        // Delete Button
+                                                        IconButton(
+                                                          tooltip: "Delete",
+                                                          icon: const Icon(Icons.delete, color: Colors.red),
+                                                          onPressed: () => _deleteReview(productId, reviewId),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ]);
+                                              }).toList(),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+
+                                      // EXACT SAME PAGINATION AS YOUR ORDERS SCREEN — NO MORE TOUCHING
+                                      if (totalPages > 1)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 16),
+                                          child: Row(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              IconButton(
+                                                onPressed: currentPage > 0 ? () => setState(() => currentPage--) : null,
+                                                icon: const Icon(Icons.chevron_left),
+                                              ),
+                                              Text("Page ${currentPage + 1} of $totalPages"),
+                                              IconButton(
+                                                onPressed: currentPage < totalPages - 1 ? () => setState(() => currentPage++) : null,
+                                                icon: const Icon(Icons.chevron_right),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                  );
+                                },
                               ),
+                            ),
+
+                            const SizedBox(height: 16),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: ElevatedButton(
+                                onPressed: () {},
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue,
+                                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                ),
+                                child: const Text("Export as CSV/PDF/Excel", style: TextStyle(color: Colors.white)),
+                              ),
+                            ),
                           ],
-                        );
-                      },
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -320,7 +554,6 @@ class _AdminFeedbackScreenState extends State<AdminFeedbackScreen> {
   }
 }
 
-// Sidebar Item (unchanged)
 class _SidebarItem extends StatefulWidget {
   final IconData icon;
   final String title;

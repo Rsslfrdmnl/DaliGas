@@ -179,7 +179,7 @@ class _ManageAddressScreenState extends State<ManageAddressScreen> {
                   return GestureDetector(
                     onTap: () => _toggleActive(index),
                     child: Card(
-                      color: isActive ? const Color(0xFFE8F5E9) : Colors.white,
+                      color: isActive ? const Color(0xFFE8F5E9) : null,
                       margin: const EdgeInsets.only(bottom: 10),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -223,7 +223,7 @@ class _ManageAddressScreenState extends State<ManageAddressScreen> {
               ),
       ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.white,
+        backgroundColor: null,
         foregroundColor: const Color(0xFF052238),
         onPressed: _addAddress,
         child: const Icon(Icons.add),

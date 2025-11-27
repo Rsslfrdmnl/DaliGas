@@ -149,14 +149,14 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: null,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
         content: Text(content),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white)),
           ),
           if (openSettings != null)
             TextButton(
@@ -284,7 +284,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                               style: const TextStyle(fontWeight: FontWeight.w600),
                             ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
+                              backgroundColor: null,
                               foregroundColor: const Color(0xFF052238),
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -300,7 +300,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                             label: const Text('Confirm'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green.shade600,
-                              foregroundColor: Colors.white,
+                              foregroundColor: null,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),

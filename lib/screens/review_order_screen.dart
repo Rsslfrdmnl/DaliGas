@@ -55,7 +55,7 @@ class _ReviewOrderScreenState extends State<ReviewOrderScreen>
       appBar: AppBar(
         title: const Text('Rate Order'),
         backgroundColor: const Color(0xFF052238),
-        foregroundColor: Colors.white,
+        foregroundColor: null,
       ),
       body: Stack(
         children: [

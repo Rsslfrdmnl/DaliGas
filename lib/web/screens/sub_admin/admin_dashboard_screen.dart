@@ -72,7 +72,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           _SidebarItem(Icons.feedback, "Feedback", false, () {
             _navigateTo(const AdminFeedbackScreen());
           }),
-          _SidebarItem(Icons.assignment, "Reports", false, () {
+          _SidebarItem(Icons.flag, "User Reports", false, () {
             _navigateTo(const AdminReportsScreen());
           }),
           _SidebarItem(Icons.settings, "Settings", false, () {

@@ -107,7 +107,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             width: double.infinity,
             child: ElevatedButton(
               onPressed: _processing ? null : _changePassword,
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFF052238)),
+              style: ElevatedButton.styleFrom(backgroundColor: null, foregroundColor: const Color(0xFF052238)),
               child: _processing ? const CircularProgressIndicator(color: Color(0xFF052238)) : const Text('Change Password'),
             ),
           ),

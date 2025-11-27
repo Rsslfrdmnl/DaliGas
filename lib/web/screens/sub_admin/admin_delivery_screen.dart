@@ -124,7 +124,7 @@ class _AdminDeliveryScreenState extends State<AdminDeliveryScreen> {
           _SidebarItem(Icons.inventory, "Inventory", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminInventoryScreen(), transitionDuration: Duration.zero))),
           _SidebarItem(Icons.local_shipping, "Delivery Management", true, () {}),
           _SidebarItem(Icons.feedback, "Feedback", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminFeedbackScreen(), transitionDuration: Duration.zero))),
-          _SidebarItem(Icons.assignment, "Reports", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminReportsScreen(), transitionDuration: Duration.zero))),
+          _SidebarItem(Icons.flag, "User Reports", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminReportsScreen(), transitionDuration: Duration.zero))),
           _SidebarItem(Icons.settings, "Settings", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const AdminSettingsScreen(), transitionDuration: Duration.zero))),
 
           const Spacer(),

@@ -526,7 +526,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> with TickerPr
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[300]!)),
+      decoration: BoxDecoration(color: Color(0xFFF9F6FB), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[300]!)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

@@ -152,7 +152,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 ElevatedButton(
                   onPressed: isSaving ? null : _updateSettings,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
+                    backgroundColor: null,
                     minimumSize: const Size(double.infinity, 50),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(24),

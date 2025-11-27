@@ -405,7 +405,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           data: Theme.of(context).copyWith(splashColor: Colors.transparent, highlightColor: Colors.transparent),
           child: BottomNavigationBar(
             type: BottomNavigationBarType.fixed,
-            backgroundColor: Colors.white,
+            backgroundColor: null,
             currentIndex: _currentIndex,
             selectedItemColor: const Color(0xFF0D2236),
             unselectedItemColor: Colors.black,
@@ -613,7 +613,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               child: Container(
                                                 color: const Color(0xFF0D2236),
                                                 child: Image.network(imageUrl, fit: BoxFit.contain, width: double.infinity,
-                                                  errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported, color: Colors.grey, size: 40),
+                                                  errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported, color: Colors.white, size: 40),
                                                 ),
                                               ),
                                             ),
@@ -709,9 +709,9 @@ class _SkeletonProductCard extends StatelessWidget {
             padding: const EdgeInsets.all(8),
             child: Column(
               children: [
-                Container(height: 14, width: 100, color: Colors.grey[600]),
+                Container(height: 14, width: 100, color: Colors.white),
                 const SizedBox(height: 8),
-                Container(height: 16, width: 60, color: Colors.grey[600]),
+                Container(height: 16, width: 60, color: Colors.white),
               ],
             ),
           ),

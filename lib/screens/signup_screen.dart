@@ -215,7 +215,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: null),
             child: const Text('Verify', style: TextStyle(color: Color(0xFF0D2236))),
           ),
         ],
@@ -434,7 +434,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 ElevatedButton(
                   onPressed: _isLoading ? null : _signUp,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
+                    backgroundColor: null,
                     foregroundColor: const Color(0xFF0D2236),
                     minimumSize: const Size(200, 50),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

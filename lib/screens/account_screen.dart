@@ -255,7 +255,7 @@ class _AccountScreenState extends State<AccountScreen> {
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
                             side: const BorderSide(color: Colors.white),
-                            foregroundColor: Colors.white,
+                            foregroundColor: null,
                           ),
                           onPressed: () async {
                             HapticFeedback.mediumImpact();
@@ -281,7 +281,7 @@ class _AccountScreenState extends State<AccountScreen> {
           data: Theme.of(context).copyWith(splashColor: Colors.transparent, highlightColor: Colors.transparent),
           child: BottomNavigationBar(
             type: BottomNavigationBarType.fixed,
-            backgroundColor: Colors.white,
+            backgroundColor: null,
             currentIndex: widget.currentIndex,
             selectedItemColor: const Color(0xFF0D2236),
             unselectedItemColor: Colors.black,
@@ -404,7 +404,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
         AndroidUiSettings(
           toolbarTitle: 'Crop Image',
           toolbarColor: const Color(0xFF052238),
-          toolbarWidgetColor: Colors.white,
+          toolbarWidgetColor: null,
           lockAspectRatio: true,
         ),
         IOSUiSettings(title: 'Crop Image'),
@@ -585,7 +585,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
               child: ListTile(
                 title: const Text('Email', style: TextStyle(fontSize: 12, color: Colors.black54)),
                 subtitle: Text(emailToShow, style: const TextStyle(color: Colors.black87)),
-                trailing: const Icon(Icons.lock, color: Colors.grey),
+                trailing: const Icon(Icons.lock, color: Colors.white),
               ),
             ),
 
@@ -630,7 +630,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                   child: ElevatedButton(
                     onPressed: isSaving ? null : _saveProfile,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
+                      backgroundColor: null,
                       foregroundColor: const Color(0xFF052238),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),

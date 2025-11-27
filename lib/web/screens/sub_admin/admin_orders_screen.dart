@@ -104,7 +104,7 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
               ),
             );
           }),
-          _SidebarItem(Icons.assignment, "Reports", false, () {
+          _SidebarItem(Icons.flag, "User Reports", false, () {
             Navigator.pushReplacement(
               context,
               PageRouteBuilder(
@@ -496,7 +496,7 @@ Expanded(
                                                               child: const Text("Complete", style: TextStyle(fontWeight: FontWeight.w600)),
                                                             )
                                                           else
-                                                            const Text("—", style: TextStyle(color: Colors.grey)),
+                                                            const Text("—", style: TextStyle(color: Colors.white)),
                                                         ],
                                                       ),
                                                     ),

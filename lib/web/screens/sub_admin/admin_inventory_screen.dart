@@ -143,7 +143,7 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                     pageBuilder: (_, __, ___) => const AdminFeedbackScreen(),
                     transitionDuration: Duration.zero));
           }),
-          _SidebarItem(Icons.assignment, "Reports", false, () {
+          _SidebarItem(Icons.flag, "User Reports", false, () {
             Navigator.pushReplacement(
                 context,
                 PageRouteBuilder(
@@ -212,7 +212,7 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
         Text(value,
             style: TextStyle(
                 fontWeight: FontWeight.bold, fontSize: 14, color: color)),
-        Text(subtitle, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        Text(subtitle, style: const TextStyle(fontSize: 11, color: Colors.black)),
       ],
     );
   }
@@ -1102,10 +1102,16 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
                                 child: Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: Colors.blue.shade50,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border:
-                                        Border.all(color: Colors.blue.shade200),
+                                    color: Theme.of(context).brightness == Brightness.dark
+                                        ? const Color(0xFF1E3A5F)
+                                        : Colors.blue.shade50,
+                                        borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: Theme.of(context).brightness == Brightness.dark
+                                          ? Colors.blue.shade600
+                                          : Colors.blue.shade200,
+                                    ),
+
                                   ),
                                   child: StreamBuilder<DocumentSnapshot>(
                                     stream: firestore

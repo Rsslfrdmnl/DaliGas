@@ -257,7 +257,7 @@ class _GcashPaymentScreenState extends State<GcashPaymentScreen> {
         appBar: AppBar(
           title: const Text('GCash Payment'),
           backgroundColor: const Color(0xFF001B33),
-          foregroundColor: Colors.white,
+          foregroundColor: null,
           automaticallyImplyLeading: false,
           actions: [
             IconButton(

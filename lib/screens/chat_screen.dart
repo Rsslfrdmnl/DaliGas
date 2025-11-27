@@ -254,64 +254,14 @@ void initState() {
               },
             ),
 
-            // 3. Report Driver (Customer Only)
+            // REPORT DRIVER – FINAL PROFESSIONAL VERSION
             if (!widget.isEmployee)
               ListTile(
-                leading: const Icon(Icons.flag, color: Colors.red),
+                leading: const Icon(Icons.flag_outlined, color: Colors.red),
                 title: const Text('Report Driver'),
                 onTap: () async {
                   Navigator.pop(context);
-
-                  final TextEditingController reasonController =
-                      TextEditingController();
-                  final report = await showDialog<String>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Report Driver'),
-                      content: TextField(
-                        controller: reasonController,
-                        decoration: const InputDecoration(
-                          hintText: 'Describe the issue...',
-                          border: OutlineInputBorder(),
-                        ),
-                        maxLines: 3,
-                      ),
-                      actions: [
-                        TextButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text('Cancel')),
-                        TextButton(
-                          onPressed: () => Navigator.pop(
-                              ctx, reasonController.text.trim()),
-                          style: TextButton.styleFrom(foregroundColor: Colors.red),
-                          child: const Text('Send'),
-                        ),
-                      ],
-                    ),
-                  );
-
-                  if (report == null || report.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Report cancelled')),
-                    );
-                    return;
-                  }
-
-                  final parts = widget.chatId.split('_');
-                  final driverId = parts[1]; // employee is always index 1
-
-                  await firestore.collection('reports').add({
-                    'reporterId': userId,
-                    'driverId': driverId,
-                    'chatId': widget.chatId,
-                    'reason': report,
-                    'timestamp': FieldValue.serverTimestamp(),
-                    'status': 'pending',
-                  });
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Report sent to admin')),
-                  );
+                  _showReportDialog();
                 },
               ),
 
@@ -322,12 +272,273 @@ void initState() {
     );
   }
 
+  Future<void> _showReportDialog() async {
+    final List<String> reportTypes = ['Comment', 'Reply', 'Chat', 'Review', 'Bug', 'Order Issue', 'Payment Problem', 'Delivery', 'Others'];
+    final List<String> reasons = [
+      "Rude or unprofessional behavior",
+      "Did not follow delivery instructions",
+      "Late delivery without communication",
+      "Item damaged or missing",
+      "Safety concern (reckless driving)",
+      "Requested extra payment",
+      "Wrong address or refused to deliver",
+      "Spam or inappropriate content",
+      "Other issue",
+    ];
+
+    String? selectedType;
+    String? selectedReason;
+    final detailsController = TextEditingController();
+
+    // Scroll controllers for smooth auto-scroll
+    final scrollController = ScrollController();
+    final typeKey = GlobalKey();
+    final reasonKey = GlobalKey();
+    final descriptionKey = GlobalKey();
+
+    final result = await showDialog<Map<String, String>?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setStateDialog) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.flag, color: Colors.red),
+              SizedBox(width: 12),
+              Text('Report Issue', style: TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: MediaQuery.of(context).size.height * 0.7, // nice height
+            child: SingleChildScrollView(
+              controller: scrollController,
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('What are you reporting?', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 12),
+
+                  // Report Type
+                  DropdownButtonFormField<String>(
+                    key: typeKey,
+                    value: selectedType,
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: Colors.grey.shade100,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    hint: const Text('Select report type'),
+                    items: reportTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                    onChanged: (val) {
+                      setStateDialog(() {
+                        selectedType = val;
+                      });
+                      // Auto-scroll to Reason after selecting type
+                      Future.delayed(const Duration(milliseconds: 300), () {
+                        Scrollable.ensureVisible(
+                          reasonKey.currentContext!,
+                          duration: const Duration(milliseconds: 400),
+                          curve: Curves.easeInOut,
+                          alignment: 0.1,
+                        );
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Reason Section
+                  const Text('Reason', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Container(key: reasonKey), // Anchor point
+
+                  ...reasons.map((r) => Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        decoration: BoxDecoration(
+                          color: selectedReason == r ? Colors.red.shade50 : Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: selectedReason == r ? Colors.red.shade400 : Colors.transparent,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: RadioListTile<String>(
+                          dense: true,
+                          title: Text(r, style: const TextStyle(fontSize: 15)),
+                          value: r,
+                          groupValue: selectedReason,
+                          activeColor: Colors.red.shade600,
+                          onChanged: (val) {
+                            setStateDialog(() {
+                              selectedReason = val;
+                            });
+                            // Auto-scroll to Description after selecting reason
+                            Future.delayed(const Duration(milliseconds: 300), () {
+                              Scrollable.ensureVisible(
+                                descriptionKey.currentContext!,
+                                duration: const Duration(milliseconds: 500),
+                                curve: Curves.easeInOut,
+                                alignment: 0.0,
+                              );
+                              // Optional: auto-focus the text field
+                              FocusScope.of(context).requestFocus(FocusNode());
+                            });
+                          },
+                        ),
+                      )),
+
+                  const SizedBox(height: 20),
+
+                  // Description
+                  const Text('Description (optional but recommended)', 
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Container(key: descriptionKey), // Anchor point
+                  TextField(
+                    controller: detailsController,
+                    maxLines: 5,
+                    textInputAction: TextInputAction.newline,
+                    decoration: InputDecoration(
+                      hintText: 'Provide more details about the issue...',
+                      filled: true,
+                      fillColor: Colors.grey.shade100,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.all(14),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              onPressed: (selectedType == null || selectedReason == null)
+                  ? null
+                  : () => Navigator.pop(ctx, {
+                        'type': selectedType!,
+                        'reason': selectedReason!,
+                        'details': detailsController.text.trim(),
+                      }),
+              icon: const Icon(Icons.send, size: 18),
+              label: const Text('Submit Report'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade600,
+                foregroundColor: null,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report cancelled')));
+      return;
+    }
+
+    final type = result['type']!;
+    final reason = result['reason']!;
+    final details = result['details']!;
+    final content = details.isNotEmpty ? '$reason\n\n$details' : reason;
+
+    // === 1. Get reporter full name ===
+    String reporterName = 'Unknown User';
+    try {
+      final userDoc = await firestore.collection('users').doc(userId).get();
+      if (userDoc.exists) {
+        reporterName = userDoc['fullName'] ?? userDoc['username'] ?? 'Customer';
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch reporter name: $e');
+    }
+
+    // === 2. Generate next REP-XXX ID ===
+    String reportId = 'REP-001';
+    final counterSnap = await firestore.collection('counters').doc('reports').get();
+    int nextNum = 1;
+
+    if (counterSnap.exists) {
+      nextNum = (counterSnap['lastNumber'] ?? 0) + 1;
+    }
+    await firestore.collection('counters').doc('reports').set({'lastNumber': nextNum}, SetOptions(merge: true));
+    reportId = 'REP-${nextNum.toString().padLeft(3, '0')}';
+
+    // === 3. Format date ===
+    final now = DateTime.now();
+    final formattedDate = DateFormat('MMMM d, yyyy').format(now); // November 26, 2025
+
+    // === 4. Extract employee info ===
+    final parts = widget.chatId.split('_');
+    final employeeId = parts.length > 1 ? parts[1] : null;
+    final employeeName = widget.title;
+
+    // === 5. Save report with EXACT admin format ===
+    await firestore.collection('reports').doc(reportId).set({
+      'reportId': reportId,
+      'type': type,
+      'reporterId': userId,
+      'reporterName': reporterName,
+      'employeeId': employeeId,
+      'employeeName': employeeName,
+      'orderId': widget.orderId ?? '',
+      'chatId': widget.chatId,
+      'reason': reason,
+      'content': content,
+      'date': formattedDate,
+      'timestamp': FieldValue.serverTimestamp(),
+      'status': 'pending',
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+  SnackBar(
+    backgroundColor: Colors.green.shade700,
+    behavior: SnackBarBehavior.floating,
+    margin: const EdgeInsets.all(16),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    content: Row(
+  children: [
+    const Icon(Icons.check_circle, color: Colors.white),
+    const SizedBox(width: 12),
+    Expanded(
+      child: RichText(
+        text: TextSpan(
+          style: const TextStyle(fontSize: 15, color: Colors.white),
+          children: [
+            const TextSpan(text: 'Report '),
+            const TextSpan(text: 'submitted successfully!'),
+          ],
+        ),
+        overflow: TextOverflow.ellipsis,
+        maxLines: 2,
+      ),
+    ),
+  ],
+),
+    duration: const Duration(seconds: 5),
+  ),
+);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFE5E5E5),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: null,
         elevation: 1,
         iconTheme: const IconThemeData(color: Colors.black),
         title: Row(
@@ -380,7 +591,7 @@ void initState() {
                       return const Center(
                         child: Text(
                           'No messages yet. Say hello!',
-                          style: TextStyle(color: Colors.grey, fontSize: 16),
+                          style: TextStyle(color: Colors.white, fontSize: 16),
                         ),
                       );
                     }
@@ -425,7 +636,7 @@ void initState() {
                               decoration: BoxDecoration(
                                 color: isMe
                                     ? const Color(0xFF0D2236)
-                                    : Colors.white,
+                                    : null,
                                 borderRadius: BorderRadius.circular(18),
                                 boxShadow: [
                                   BoxShadow(
@@ -493,7 +704,7 @@ void initState() {
                 padding: EdgeInsets.only(left: 16, bottom: 8),
                 child: Text(
                   'Typing...',
-                  style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic),
+                  style: TextStyle(color: Colors.white, fontStyle: FontStyle.italic),
                 ),
               ),
             ),

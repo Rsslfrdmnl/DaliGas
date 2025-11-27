@@ -493,7 +493,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
               final unreadCount = snapshot.data ?? 0;
               return BottomNavigationBar(
                 type: BottomNavigationBarType.fixed,
-                backgroundColor: Colors.white,
+                backgroundColor: null,
                 currentIndex: 1,
                 selectedItemColor: const Color(0xFF0D2236),
                 unselectedItemColor: Colors.black,
@@ -726,7 +726,7 @@ class _MessageCardState extends State<MessageCard> {
   void _showBottomSheet(BuildContext context, String chatId, bool isUnread, bool isPinned) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: null,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (_) => SafeArea(
         child: Wrap(

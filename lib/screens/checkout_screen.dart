@@ -195,7 +195,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   Widget _buildProductList() {
     if (checkoutItems.isEmpty) {
-      return const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('No items to checkout.', style: TextStyle(color: Colors.grey))));
+      return const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('No items to checkout.', style: TextStyle(color: Colors.white))));
     }
 
     return Column(
@@ -222,7 +222,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   child: Image.network(
                     item['imageUrl'] ?? '',
                     width: 70, height: 70, fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => Container(width: 70, height: 70, color: Colors.grey[300], child: const Icon(Icons.image_not_supported, color: Colors.grey)),
+                    errorBuilder: (_, __, ___) => Container(width: 70, height: 70, color: Colors.grey[300], child: const Icon(Icons.image_not_supported, color: Colors.white)),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -319,7 +319,7 @@ Widget _buildPaymentMethods() {
                       label: const Text('Pay with GCash'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
+                        foregroundColor: null,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
                       onPressed: () => Navigator.pop(context, true),

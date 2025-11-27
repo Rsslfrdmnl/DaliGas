@@ -216,7 +216,7 @@ class _SuperReportsScreenState extends State<SuperReportsScreen> {
                                 value: _selectedReportType,
                                 decoration: InputDecoration(
                                   filled: true,
-                                  fillColor: Colors.grey[100],
+                                  fillColor: Color(0xFFF9F6FB),
                                   contentPadding: const EdgeInsets.symmetric(
                                       horizontal: 12, vertical: 8),
                                   border: OutlineInputBorder(
