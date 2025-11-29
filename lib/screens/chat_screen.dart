@@ -436,7 +436,7 @@ void initState() {
               label: const Text('Submit Report'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red.shade600,
-                foregroundColor: null,
+                foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
@@ -538,7 +538,7 @@ void initState() {
     return Scaffold(
       backgroundColor: const Color(0xFFE5E5E5),
       appBar: AppBar(
-        backgroundColor: null,
+        backgroundColor: Colors.white,
         elevation: 1,
         iconTheme: const IconThemeData(color: Colors.black),
         title: Row(
@@ -640,8 +640,8 @@ void initState() {
                                 borderRadius: BorderRadius.circular(18),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 4,
+                                    color: Colors.white,
+                                    blurRadius: 0,
                                     offset: const Offset(0, 2),
                                   )
                                 ],
@@ -704,7 +704,7 @@ void initState() {
                 padding: EdgeInsets.only(left: 16, bottom: 8),
                 child: Text(
                   'Typing...',
-                  style: TextStyle(color: Colors.white, fontStyle: FontStyle.italic),
+                  style: TextStyle(color: Colors.black, fontStyle: FontStyle.italic),
                 ),
               ),
             ),

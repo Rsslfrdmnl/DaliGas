@@ -461,11 +461,12 @@ export const cleanupAbandonedGcashOrders = onSchedule(
     schedule: "every 24 hours",
     timeZone: "Asia/Manila",        // Good for PH users
     region: REGION,
+    database: "daligas"
   },
   async (event) => {
-    const cutoff = admin.firestore.Timestamp.fromDate(
-      new Date(Date.now() - 24 * 60 * 60 * 1000) // 24 hours ago
-    );
+    const cutoff = getFirestore().Timestamp.fromDate(
+  new Date(Date.now() - 24 * 60 * 60 * 1000)
+);
 
     const abandonedOrdersSnap = await db
       .collection("orders")

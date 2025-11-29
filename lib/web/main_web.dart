@@ -97,53 +97,49 @@ final ThemeData darkTheme = ThemeData(
   brightness: Brightness.dark,
   fontFamily: 'Roboto',
   primaryColor: const Color(0xFF0D2236),
-  
-  // Core dark colors
-  scaffoldBackgroundColor: Color(0xFFF8F5FA),
-  canvasColor: Color(0xFFF9F6FB),           // for cards, dialogs
-  cardColor: Color(0xFFF9F6FB),
-  dialogBackgroundColor: Color(0xFFF9F6FB),
 
-  // Text
+  // Core dark mode colors that automatically apply to all cards/containers
+  scaffoldBackgroundColor: const Color(0xFF0A0E17),    // Main page background
+  cardColor: const Color(0xFF16213E),                  // All cards, containers, dialogs
+  canvasColor: const Color(0xFF16213E),                // Secondary backgrounds
+  dialogBackgroundColor: const Color(0xFF16213E),     // Dialogs and bottom sheets
+  
+  dividerColor: const Color(0xFF2D3748),               // Dividers and borders
+  hoverColor: const Color(0xFF2A4066).withOpacity(0.3),
+
   textTheme: const TextTheme(
-    bodyLarge: TextStyle(color: Color(0xFFE4E6EB)),
-    bodyMedium: TextStyle(color: Color(0xFFB0B3B8)),
+    bodyLarge: TextStyle(color: Color(0xFFE4E6EB)),   // Primary text
+    bodyMedium: TextStyle(color: Color(0xFFB0B3B8)), // Secondary text
     titleLarge: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+    labelLarge: TextStyle(color: Color(0xFFB0B3B8)),
   ),
 
-  // AppBar (keep your brand color)
   appBarTheme: const AppBarTheme(
     backgroundColor: Color(0xFF0D2236),
-    foregroundColor: null,
+    foregroundColor: Colors.white,
   ),
 
-  // Inputs
-  inputDecorationTheme: InputDecorationTheme(
-    filled: true,
-    fillColor: const Color(0xFF1A2338),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: Colors.grey[700]!),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: Color(0xFF0D2236), width: 2),
-    ),
-    labelStyle: const TextStyle(color: Color(0xFFB0B3B8)),
-  ),
-
-  // Buttons
   elevatedButtonTheme: ElevatedButtonThemeData(
     style: ElevatedButton.styleFrom(
-      backgroundColor: const Color(0xFF0D2236),
-      foregroundColor: null,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      backgroundColor: Color(0xFF0D2236),
+      foregroundColor: Colors.white,
     ),
   ),
 
-  // Tables, DataTable
-  dividerColor: const Color(0xFF2D3748),
-  hoverColor: const Color(0xFF2A4066).withOpacity(0.3),
+  inputDecorationTheme: const InputDecorationTheme(
+    filled: true,
+    fillColor: Color(0xFF1A2338),                      // Text field backgrounds
+    hintStyle: TextStyle(color: Color(0xFF64748B)),
+    border: OutlineInputBorder(
+      borderSide: BorderSide(color: Color(0xFF2D3748)),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Color(0xFF2D3748)),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderSide: BorderSide(color: Color(0xFF0D2236), width: 2),
+    ),
+  ),
 );
 
 void main() async {

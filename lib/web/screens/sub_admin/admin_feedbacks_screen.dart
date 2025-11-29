@@ -1,3 +1,5 @@
+import 'dart:html' as html;
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -27,6 +29,110 @@ class _AdminFeedbackScreenState extends State<AdminFeedbackScreen> {
 
   final Map<String, String> _productCache = {};
   final Map<String, String> _userCache = {};
+
+  void _exportReviewsToCsv() async {
+  try {
+    // Fetch all reviews using collectionGroup
+    final reviewsSnapshot = await firestore.collectionGroup('reviews').get();
+
+    final rows = <List<String>>[];
+
+    // Add header row
+    rows.add([
+      'Review ID',
+      'Product Name',
+      'Customer Name',
+      'Rating',
+      'Comment',
+      'Admin Reply',
+      'Date Submitted',
+      'Has Reply'
+    ]);
+
+    for (var doc in reviewsSnapshot.docs) {
+      final data = doc.data();
+      final productId = doc.reference.parent.parent!.id;
+      final userId = data['userId'] as String?;
+      final reviewId = doc.id;
+      final rating = (data['rating'] as num?)?.toInt() ?? 0;
+      final comment = data['review'] ?? data['comment'] ?? '';
+      final adminReply = data['adminReply']?.toString() ?? '';
+      final timestamp = (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+
+      // Get product name
+      String productName = 'Unknown Product';
+      try {
+        final productDoc = await firestore.collection('products').doc(productId).get();
+        if (productDoc.exists) {
+          productName = productDoc.data()?['name']?.toString() ?? 'Unknown Product';
+        }
+      } catch (e) {
+        productName = 'Error retrieving product';
+      }
+
+      // Get customer name
+      String customerName = 'Anonymous';
+      if (userId != null && userId.isNotEmpty) {
+        try {
+          final userDoc = await firestore.collection('users').doc(userId).get();
+          if (userDoc.exists) {
+            customerName = userDoc.data()?['fullName']?.toString() ?? 'Anonymous';
+          }
+        } catch (e) {
+          customerName = 'Error retrieving user';
+        }
+      }
+
+      rows.add([
+        reviewId,
+        productName,
+        customerName,
+        rating.toString(),
+        comment,
+        adminReply,
+        DateFormat('MMMM d, yyyy - hh:mm a').format(timestamp),
+        data['hasReply'] == true ? 'Yes' : 'No',
+      ]);
+    }
+
+    // Convert to CSV string
+    final csvString = _simpleCsvConvert(rows);
+
+    // Create and download the file
+    final timestamp = DateFormat('yyyy-MM-dd_HH-mm').format(DateTime.now());
+    final blob = html.Blob([utf8.encode(csvString)]);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', 'reviews_export_$timestamp.csv')
+      ..click();
+
+    html.Url.revokeObjectUrl(url);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Reviews exported successfully (${rows.length - 1} reviews)'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error exporting reviews: $e')),
+    );
+  }
+}
+
+// Add this helper method for CSV conversion
+String _simpleCsvConvert(List<List<String>> rows) {
+  String escapeCell(String cell) {
+    if (cell.contains('"')) cell = cell.replaceAll('"', '""');
+    if (cell.contains(',') || cell.contains('"') || cell.contains('\n')) {
+      return '"$cell"';
+    }
+    return cell;
+  }
+
+  return rows.map((row) => row.map(escapeCell).join(',')).join('\r\n');
+}
 
   Future<void> _logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
@@ -528,17 +634,22 @@ Future<void> _replyToReview(String productId, String reviewId, String userId, St
 
                             const SizedBox(height: 16),
                             Align(
-                              alignment: Alignment.centerRight,
-                              child: ElevatedButton(
-                                onPressed: () {},
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.blue,
-                                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                ),
-                                child: const Text("Export as CSV/PDF/Excel", style: TextStyle(color: Colors.white)),
-                              ),
-                            ),
+  alignment: Alignment.centerRight,
+  child: ElevatedButton.icon(
+    onPressed: _exportReviewsToCsv, // Now calls the functional export method
+    icon: const Icon(
+      Icons.download,
+      size: 18,
+      color: Colors.white,
+    ),
+    label: const Text("Export Reviews", style: TextStyle(color: Colors.white)),
+    style: ElevatedButton.styleFrom(
+      backgroundColor: Colors.blue,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+    ),
+  ),
+),
                           ],
                         ),
                       ),

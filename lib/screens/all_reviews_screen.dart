@@ -189,7 +189,7 @@ class _AllReviewsScreenState extends State<AllReviewsScreen> {
               }),
               icon: const Icon(Icons.send, size: 18),
               label: const Text('Submit Report'),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade600, foregroundColor: null),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade600, foregroundColor: Colors.white),
             ),
           ],
         ),
@@ -422,7 +422,7 @@ class _AllReviewsScreenState extends State<AllReviewsScreen> {
                                       padding: const EdgeInsets.only(top: 6),
                                       child: Text(
                                         "• Replied ${DateFormat('MMM d • hh:mm a').format(repliedAt)}",
-                                        style: const TextStyle(fontSize: 11.5, color: Colors.white),
+                                        style: const TextStyle(fontSize: 11.5, color: Colors.black87),
                                       ),
                                     ),
                                 ],

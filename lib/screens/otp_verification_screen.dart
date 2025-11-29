@@ -27,7 +27,7 @@ class OTPVerificationScreen extends StatefulWidget {
 
 class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = firebase
+  final FirebaseFirestore _firestore = firestore;
 
   final TextEditingController _otpController = TextEditingController();
   bool _isLoading = false;

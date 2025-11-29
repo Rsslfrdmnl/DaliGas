@@ -1,3 +1,5 @@
+import 'dart:html' as html;
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -25,6 +27,106 @@ class _AdminDeliveryScreenState extends State<AdminDeliveryScreen> {
   int currentPage = 0;
   final int itemsPerPage = 6;
   final TextEditingController searchController = TextEditingController();
+
+  void _exportDeliveriesToCsv() async {
+  try {
+    // Fetch all relevant orders
+    final ordersSnapshot = await firestore
+        .collection('orders')
+        .where('deliveryStatus', whereIn: ['Processing', 'Shipped', 'Delivered'])
+        .get();
+
+    // Fetch lookup data for employees and users
+    final results = await Future.wait([
+      firestore.collection('employees').get(),
+      firestore.collection('users').get(),
+    ]);
+
+    final employees = {for (var d in results[0].docs) d.id: d.data()};
+    final users = {for (var d in results[1].docs) d.id: d.data()};
+
+    final rows = <List<String>>[];
+
+    // Add header row
+    rows.add([
+      'Order ID',
+      'Date & Time',
+      'Customer Name',
+      'Delivery Address',
+      'Driver Name',
+      'Delivery Status',
+      'Total Amount',
+      'Payment Method',
+    ]);
+
+    for (var doc in ordersSnapshot.docs) {
+      final data = doc.data();
+      final createdAt = (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+      final status = data['deliveryStatus'] ?? 'Processing';
+      final employeeId = data['employeeId'] as String?;
+      final userId = data['userId'] as String?;
+      final address = data['deliveryAddress'] ?? 'No address';
+      final total = (data['total'] ?? 0).toDouble();
+      final paymentMethod = data['paymentMethod'] ?? 'COD';
+
+      final customerName = userId != null
+          ? (users[userId]?['fullName'] as String?) ?? 'Unknown Customer'
+          : 'Unknown Customer';
+
+      final driverName = employeeId != null
+          ? (employees[employeeId]?['name'] as String?) ?? 'Unknown Driver'
+          : 'Not Assigned';
+
+      rows.add([
+        doc.id,
+        DateFormat('MMMM d, yyyy - hh:mm a').format(createdAt),
+        customerName,
+        address,
+        driverName,
+        status,
+        total.toStringAsFixed(2),
+        paymentMethod.toUpperCase(),
+      ]);
+    }
+
+    // Convert to CSV string
+    final csvString = _simpleCsvConvert(rows);
+
+    // Create and download the file
+    final timestamp = DateFormat('yyyy-MM-dd_HH-mm').format(DateTime.now());
+    final blob = html.Blob([utf8.encode(csvString)]);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', 'delivery_report_$timestamp.csv')
+      ..click();
+
+    html.Url.revokeObjectUrl(url);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Delivery report exported successfully (${rows.length - 1} orders)'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error exporting deliveries: $e')),
+    );
+  }
+}
+
+// Add this helper method for CSV conversion
+String _simpleCsvConvert(List<List<String>> rows) {
+  String escapeCell(String cell) {
+    if (cell.contains('"')) cell = cell.replaceAll('"', '""');
+    if (cell.contains(',') || cell.contains('"') || cell.contains('\n')) {
+      return '"$cell"';
+    }
+    return cell;
+  }
+
+  return rows.map((row) => row.map(escapeCell).join(',')).join('\r\n');
+}
 
   Future<void> _logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
@@ -436,14 +538,22 @@ DataCell(
 
                             const SizedBox(height: 16),
                             Align(
-                              alignment: Alignment.centerRight,
-                              child: ElevatedButton.icon(
-                                onPressed: () {},
-                                icon: const Icon(Icons.download),
-                                label: const Text("Export Deliveries"),
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-                              ),
-                            ),
+  alignment: Alignment.centerRight,
+  child: ElevatedButton.icon(
+    onPressed: _exportDeliveriesToCsv,
+    icon: const Icon(
+      Icons.download, 
+      size: 18,
+      color: Colors.white,  // Explicitly set the icon color to white
+    ),
+    label: const Text("Export Deliveries", style: TextStyle(color: Colors.white)),
+    style: ElevatedButton.styleFrom(
+      backgroundColor: Colors.blue,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+    ),
+  ),
+),
                           ],
                         ),
                       ),

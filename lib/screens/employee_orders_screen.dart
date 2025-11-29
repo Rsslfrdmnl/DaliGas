@@ -216,7 +216,7 @@ class _EmployeeOrdersScreenState extends State<EmployeeOrdersScreen>
             const SizedBox(height: 4),
             Text('$product $weight × $qty', style: const TextStyle(fontSize: 13, color: Colors.black87)),
             const SizedBox(height: 2),
-            Text(address, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white)),
+            Text(address, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.black)),
             const SizedBox(height: 4),
             Row(
               children: [
@@ -305,7 +305,7 @@ child: _OrderActionsSheet(
               const SizedBox(height: 16),
               Text('Order Details', style: Theme.of(context).textTheme.titleLarge!.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Text('Order #$orderId', style: const TextStyle(fontSize: 16, color: Colors.white)),
+              Text('Order #$orderId', style: const TextStyle(fontSize: 16, color: Colors.black)),
               const Divider(height: 32),
               const Text('Items Ordered', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 12),
@@ -332,7 +332,7 @@ child: _OrderActionsSheet(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  Text('$weight × $qty', style: const TextStyle(color: Colors.white)),
+                                  Text('$weight × $qty', style: const TextStyle(color: Colors.black)),
                                 ],
                               ),
                             ),
@@ -682,7 +682,7 @@ Widget _buildFullOrderDetailsSheet({
         const SizedBox(height: 16),
         Text('Order Details', style: Theme.of(context).textTheme.titleLarge!.copyWith(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
-        Text('Order #$orderId', style: const TextStyle(fontSize: 16, color: Colors.white)),
+        Text('Order #$orderId', style: const TextStyle(fontSize: 16, color: Colors.black)),
         const Divider(height: 32),
 
         const Text('Items Ordered', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
@@ -711,7 +711,7 @@ Widget _buildFullOrderDetailsSheet({
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            Text('$weight × $qty', style: const TextStyle(color: Colors.white)),
+                            Text('$weight × $qty', style: const TextStyle(color: Colors.black)),
                           ],
                         ),
                       ),
@@ -745,7 +745,7 @@ Widget _buildDetailRow(String label, String value, {bool isBold = false, Color? 
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(width: 140, child: Text(label, style: const TextStyle(color: Colors.white))),
+        SizedBox(width: 140, child: Text(label, style: const TextStyle(color: Colors.black))),
         Expanded(
           child: Text(
             value,
@@ -1178,7 +1178,7 @@ String _formatTimestamp(Timestamp timestamp) {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Order #${widget.orderId}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-                    Text('${widget.items.length} item${widget.items.length > 1 ? 's' : ''}', style: const TextStyle(color: Colors.white)),
+                    Text('${widget.items.length} item${widget.items.length > 1 ? 's' : ''}', style: const TextStyle(color: Colors.black)),
                   ],
                 ),
               ),
@@ -1246,7 +1246,7 @@ String _formatTimestamp(Timestamp timestamp) {
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                         : const Icon(Icons.check, size: 20),
                     label: Text(_isConfirmingOrder ? 'Confirming...' : 'Confirm Order'),
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF052238), foregroundColor: null, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), padding: const EdgeInsets.symmetric(vertical: 14)),
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF052238), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), padding: const EdgeInsets.symmetric(vertical: 14)),
                     onPressed: _isConfirmingOrder ? null : _confirmOrder,
                   ),
                 ),
@@ -1258,7 +1258,7 @@ String _formatTimestamp(Timestamp timestamp) {
     label: const Text('See Details'),
     style: ElevatedButton.styleFrom(
       backgroundColor: Colors.deepPurple,
-      foregroundColor: null,
+      foregroundColor: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       padding: const EdgeInsets.symmetric(vertical: 14),
     ),
@@ -1292,7 +1292,7 @@ String _formatTimestamp(Timestamp timestamp) {
                   child: ElevatedButton.icon(
                     icon: isConfirmingDelivery ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.check_circle, size: 20),
                     label: Text(isConfirmingDelivery ? 'Confirming...' : 'Confirm Delivery'),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: null, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), padding: const EdgeInsets.symmetric(vertical: 14)),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), padding: const EdgeInsets.symmetric(vertical: 14)),
                     onPressed: isConfirmingDelivery ? null : _confirmDelivery,
                   ),
                 ),

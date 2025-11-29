@@ -319,7 +319,7 @@ Widget _buildPaymentMethods() {
                       label: const Text('Pay with GCash'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blue,
-                        foregroundColor: null,
+                        foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
                       onPressed: () => Navigator.pop(context, true),

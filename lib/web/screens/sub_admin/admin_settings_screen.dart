@@ -58,72 +58,75 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   }
 
   Future<void> _saveSettings() async {
-    if (currentUser == null) return;
+  if (currentUser == null) return;
 
-    setState(() => _isLoading = true);
+  setState(() => _isLoading = true);
 
-    try {
-      // Update Firestore
-      await firestore.collection('admins').doc(currentUser!.uid).set({
-        'name': _nameController.text.trim(),
-        'email': _emailController.text.trim(),
-        'darkMode': _darkModeEnabled,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+  try {
+    // Update Firestore with all changes, including dark mode
+    await firestore.collection('admins').doc(currentUser!.uid).set({
+      'name': _nameController.text.trim(),
+      'email': _emailController.text.trim(),
+      'darkMode': _darkModeEnabled,  // Only saved when user explicitly clicks Save
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
 
-      // Update email in Firebase Auth if changed
-      if (_emailController.text.trim() != currentUser!.email) {
-        await currentUser!.updateEmail(_emailController.text.trim());
-      }
+    // Apply the dark mode setting to the ThemeManager only after saving
+    await ThemeManager().setDarkMode(_darkModeEnabled);
 
-      // Change password if both fields filled
-      if (_oldPassController.text.isNotEmpty && _newPassController.text.isNotEmpty) {
-        if (_newPassController.text.length < 6) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("New password must be at least 6 characters")),
-          );
-          setState(() => _isLoading = false);
-          return;
-        }
-
-        final credential = EmailAuthProvider.credential(
-          email: currentUser!.email!,
-          password: _oldPassController.text,
-        );
-
-        await currentUser!.reauthenticateWithCredential(credential);
-        await currentUser!.updatePassword(_newPassController.text);
-
-        _oldPassController.clear();
-        _newPassController.clear();
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Settings saved successfully!"),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } on FirebaseAuthException catch (e) {
-      String message = "Failed to save settings";
-      if (e.code == 'wrong-password') {
-        message = "Old password is incorrect";
-      } else if (e.code == 'email-already-in-use') {
-        message = "Email is already in use";
-      } else if (e.code == 'requires-recent-login') {
-        message = "Please log out and log in again to change sensitive info";
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: Colors.red),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
-      );
-    } finally {
-      setState(() => _isLoading = false);
+    // Update email in Firebase Auth if changed
+    if (_emailController.text.trim() != currentUser!.email) {
+      await currentUser!.updateEmail(_emailController.text.trim());
     }
+
+    // Change password if both fields filled
+    if (_oldPassController.text.isNotEmpty && _newPassController.text.isNotEmpty) {
+      if (_newPassController.text.length < 6) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("New password must be at least 6 characters")),
+        );
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final credential = EmailAuthProvider.credential(
+        email: currentUser!.email!,
+        password: _oldPassController.text,
+      );
+
+      await currentUser!.reauthenticateWithCredential(credential);
+      await currentUser!.updatePassword(_newPassController.text);
+
+      _oldPassController.clear();
+      _newPassController.clear();
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Settings saved successfully!"),
+        backgroundColor: Colors.green,
+      ),
+    );
+  } on FirebaseAuthException catch (e) {
+    String message = "Failed to save settings";
+    if (e.code == 'wrong-password') {
+      message = "Old password is incorrect";
+    } else if (e.code == 'email-already-in-use') {
+      message = "Email is already in use";
+    } else if (e.code == 'requires-recent-login') {
+      message = "Please log out and log in again to change sensitive info";
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+    );
+  } finally {
+    setState(() => _isLoading = false);
   }
+}
 
   Future<void> _logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
@@ -298,15 +301,15 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                           const Text("Preferences", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 20),
                           SwitchListTile(
-                            title: const Text("Enable Dark Mode"),
-                            subtitle: const Text("Switch to dark theme across the admin panel"),
-                            activeColor: const Color(0xFF0D2236),
-                            value: _darkModeEnabled,
-                            onChanged: (val) async {
-                              setState(() => _darkModeEnabled = val);
-                              await ThemeManager().setDarkMode(val);
-                            },
-                          ),
+  title: const Text("Enable Dark Mode"),
+  subtitle: const Text("Switch to dark theme across the admin panel"),
+  activeColor: const Color(0xFF0D2236),
+  value: _darkModeEnabled,
+  onChanged: (val) {
+    // Only update the local state, do not save to ThemeManager or Firestore
+    setState(() => _darkModeEnabled = val);
+  },
+),
                         ],
                       ),
                     ),
@@ -320,8 +323,8 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                       width: 200,
                       child: ElevatedButton.icon(
                         onPressed: _isLoading ? null : _saveSettings,
-                        icon: _isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.save),
-                        label: Text(_isLoading ? "Saving..." : "Save Changes"),
+                        icon: _isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.save, color: Colors.white,),
+                        label: Text(_isLoading ? "Saving..." : "Save Changes", style: TextStyle(color: Colors.white)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF0D2236),
                           padding: const EdgeInsets.symmetric(vertical: 16),

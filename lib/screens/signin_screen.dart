@@ -346,7 +346,7 @@ class _SignInScreenState extends State<SignInScreen> {
                         );
                       },
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: null,
+                        foregroundColor: Colors.white,
                         side: const BorderSide(color: Colors.white70, width: 1),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),

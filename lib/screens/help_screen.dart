@@ -169,7 +169,7 @@ class _HelpScreenState extends State<HelpScreen> {
                     }),
               icon: const Icon(Icons.send, size: 18),
               label: const Text('Submit Report'),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade600, foregroundColor: null),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade600, foregroundColor: Colors.white),
             ),
           ],
         ),
@@ -332,7 +332,7 @@ class _HelpScreenState extends State<HelpScreen> {
                         label: const Text('Submit a Report', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red.shade600,
-                          foregroundColor: null,
+                          foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           elevation: 4,
                         ),

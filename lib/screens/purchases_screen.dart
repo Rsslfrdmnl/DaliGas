@@ -365,7 +365,7 @@ class PurchasesTab extends StatelessWidget {
                           children: [
                             Text(productName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w500)),
                             const SizedBox(height: 2),
-                            Text('$itemCount ${itemCount > 1 ? 'items' : 'item'} • $paymentMethod', style: const TextStyle(fontSize: 12, color: Colors.white)),
+                            Text('$itemCount ${itemCount > 1 ? 'items' : 'item'} • $paymentMethod', style: const TextStyle(fontSize: 12, color: Colors.black)),
                             const SizedBox(height: 4),
                             Text('₱${total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                           ],

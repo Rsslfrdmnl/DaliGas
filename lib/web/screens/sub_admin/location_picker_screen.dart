@@ -483,9 +483,9 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                '${_selectedLatLng!.latitude.toStringAsFixed(5)}, ${_selectedLatLng!.longitude.toStringAsFixed(5)}',
-                                style: const TextStyle(fontSize: 11, color: Colors.white),
-                              ),
+  '${_selectedLatLng!.latitude.toStringAsFixed(5)}, ${_selectedLatLng!.longitude.toStringAsFixed(5)}',
+  style: TextStyle(fontSize: 11, color: Theme.of(context).textTheme.bodyMedium?.color),
+),
                             ],
                           ),
                         ),

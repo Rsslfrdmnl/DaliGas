@@ -255,7 +255,7 @@ class _AccountScreenState extends State<AccountScreen> {
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
                             side: const BorderSide(color: Colors.white),
-                            foregroundColor: null,
+                            foregroundColor: Colors.white,
                           ),
                           onPressed: () async {
                             HapticFeedback.mediumImpact();

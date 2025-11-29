@@ -77,7 +77,7 @@ class _SuperSettingsScreenState extends State<SuperSettingsScreen> {
                   ],
                 ),
                 const SizedBox(height: 30),
-                _SidebarItem(Icons.dashboard, "Dashboard", true, () {
+                _SidebarItem(Icons.dashboard, "Dashboard", false, () {
                   Navigator.pushReplacement(
                     context,
                     PageRouteBuilder(

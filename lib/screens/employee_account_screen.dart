@@ -255,7 +255,7 @@ class _EmployeeAccountScreenState extends State<EmployeeAccountScreen>
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(
                           side: const BorderSide(color: Colors.white),
-                          foregroundColor: null,
+                          foregroundColor: Colors.white,
                         ),
                         onPressed: () async {
                           await _auth.signOut();

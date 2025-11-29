@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:daligas/web/screens/super_admin/admin_welcome_screen.dart';
+import 'package:intl/intl.dart';
 
 import 'admin_dashboard_screen.dart';
 import 'admin_orders_screen.dart';
@@ -863,43 +864,78 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
   }
 
   void _exportVisibleToCsv(List<QueryDocumentSnapshot> visibleDocs) {
-    if (!kIsWeb) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Export to CSV is available on web only.')));
-      return;
-    }
-    if (visibleDocs.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('No products to export')));
-      return;
-    }
+  if (!kIsWeb) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Export to CSV is available on web only.')),
+    );
+    return;
+  }
 
+  if (visibleDocs.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No products to export')),
+    );
+    return;
+  }
+
+  try {
     final rows = <List<String>>[];
-    rows.add(['Name', 'Category', 'Stock', 'Price', 'Availability', 'Last Restocked']);
+    
+    // Add header row
+    rows.add([
+      'Product Name',
+      'Category', 
+      'Brand',
+      'Stock Quantity',
+      'Unit Price',
+      'Availability',
+      'Last Restocked',
+      'Unit'
+    ]);
+
     for (var doc in visibleDocs) {
       final lastRestocked = _safeTimestamp(doc.safeGet<dynamic>('lastRestocked'));
       final lastRestockedText = lastRestocked != null
           ? '${lastRestocked.year}-${lastRestocked.month.toString().padLeft(2, '0')}-${lastRestocked.day.toString().padLeft(2, '0')}'
-          : '';
+          : 'Never';
+
       rows.add([
         doc.safeGet<String>('name') ?? '',
         doc.safeGet<String>('category') ?? '',
+        doc.safeGet<String>('brand') ?? '',
         (doc.safeGet<num>('stock')?.toInt() ?? 0).toString(),
         (doc.safeGet<num>('price')?.toDouble() ?? 0.0).toStringAsFixed(2),
         doc.safeGet<bool>('isAvailable') == true ? 'Available' : 'Unavailable',
         lastRestockedText,
+        doc.safeGet<String>('unit') ?? '',
       ]);
     }
 
-    final csv = const _SimpleCsvConverter().convert(rows);
-    final bytes = utf8.encode(csv);
-    final blob = html.Blob([bytes]);
+    // Convert to CSV string - now rows is properly typed as List<List<String>>
+    final csvString = const _SimpleCsvConverter().convert(rows);
+    
+    // Create and download the file with timestamp
+    final timestamp = DateFormat('yyyy-MM-dd_HH-mm').format(DateTime.now());
+    final blob = html.Blob([utf8.encode(csvString)]);
     final url = html.Url.createObjectUrlFromBlob(blob);
     final anchor = html.AnchorElement(href: url)
-      ..setAttribute('download', 'inventory_report.csv')
+      ..setAttribute('download', 'inventory_report_$timestamp.csv')
       ..click();
+    
     html.Url.revokeObjectUrl(url);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Inventory report exported successfully (${visibleDocs.length} products)'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error exporting inventory: $e')),
+    );
   }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -1001,98 +1037,68 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
 
                               // === ACTION BUTTONS + SEARCH ===
                               Row(
-                                children: [
-                                  ElevatedButton(
-                                    onPressed: () async {
-                                      final snapshot = await _productsRef
-                                          .orderBy('name')
-                                          .get();
-                                      final visible = snapshot.docs.where((d) {
-                                        final name = (d.safeGet<String>('name') ??
-                                                '')
-                                            .toLowerCase();
-                                        final brand = (d.safeGet<String>('brand') ??
-                                                '')
-                                            .toLowerCase();
-                                        final category = (d.safeGet<String>('category') ??
-                                                '')
-                                            .toLowerCase();
-                                        final q =
-                                            _searchQuery.trim().toLowerCase();
-                                        return q.isEmpty ||
-                                            name.contains(q) ||
-                                            brand.contains(q) ||
-                                            category.contains(q);
-                                      }).toList();
-                                      await _updateStockDialogBulk(visible);
-                                    },
-                                    style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.blue,
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 18, vertical: 12),
-                                        shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(6))),
-                                    child: const Text("Update Stock",
-                                        style: TextStyle(color: Colors.white)),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  OutlinedButton(
-                                    onPressed: () async {
-                                      final snapshot = await _productsRef
-                                          .orderBy('name')
-                                          .get();
-                                      final visible = snapshot.docs.where((d) {
-                                        final name = (d.safeGet<String>('name') ??
-                                                '')
-                                            .toLowerCase();
-                                        final brand = (d.safeGet<String>('brand') ??
-                                                '')
-                                            .toLowerCase();
-                                        final category = (d.safeGet<String>('category') ??
-                                                '')
-                                            .toLowerCase();
-                                        final q =
-                                            _searchQuery.trim().toLowerCase();
-                                        return q.isEmpty ||
-                                            name.contains(q) ||
-                                            brand.contains(q) ||
-                                            category.contains(q);
-                                      }).toList();
-                                      _exportVisibleToCsv(visible);
-                                    },
-                                    style: OutlinedButton.styleFrom(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 18, vertical: 12),
-                                        shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(6))),
-                                    child: const Text("Export Inventory Report"),
-                                  ),
-                                  const Spacer(),
-                                  SizedBox(
-                                    width: 220,
-                                    child: TextField(
-                                      decoration: InputDecoration(
-                                        hintText: "Search",
-                                        prefixIcon: const Icon(Icons.search),
-                                        border: OutlineInputBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(6)),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                                horizontal: 12, vertical: 10),
-                                      ),
-                                      onChanged: (q) {
-                                        setState(() {
-                                          _searchQuery = q.toLowerCase();
-                                          _currentPage = 0;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                ],
-                              ),
+  children: [
+    ElevatedButton(
+      onPressed: () async {
+        final snapshot = await _productsRef.orderBy('name').get();
+        final visible = snapshot.docs.where((d) {
+          final name = (d.safeGet<String>('name') ?? '').toLowerCase();
+          final brand = (d.safeGet<String>('brand') ?? '').toLowerCase();
+          final category = (d.safeGet<String>('category') ?? '').toLowerCase();
+          final q = _searchQuery.trim().toLowerCase();
+          return q.isEmpty || name.contains(q) || brand.contains(q) || category.contains(q);
+        }).toList();
+        await _updateStockDialogBulk(visible);
+      },
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.blue,
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+      child: const Text("Update Stock", style: TextStyle(color: Colors.white)),
+    ),
+    const SizedBox(width: 12),
+    ElevatedButton.icon(
+      onPressed: () async {
+        final snapshot = await _productsRef.orderBy('name').get();
+        final visible = snapshot.docs.where((d) {
+          final name = (d.safeGet<String>('name') ?? '').toLowerCase();
+          final brand = (d.safeGet<String>('brand') ?? '').toLowerCase();
+          final category = (d.safeGet<String>('category') ?? '').toLowerCase();
+          final q = _searchQuery.trim().toLowerCase();
+          return q.isEmpty || name.contains(q) || brand.contains(q) || category.contains(q);
+        }).toList();
+        _exportVisibleToCsv(visible);
+      },
+      icon: const Icon(Icons.download, size: 18),
+      label: const Text("Export Inventory Report"),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+    ),
+    const Spacer(),
+    SizedBox(
+      width: 220,
+      child: TextField(
+        decoration: InputDecoration(
+          hintText: "Search products",
+          prefixIcon: const Icon(Icons.search),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        ),
+        onChanged: (q) {
+          setState(() {
+            _searchQuery = q.toLowerCase();
+            _currentPage = 0;
+          });
+        },
+      ),
+    ),
+  ],
+),
                               const SizedBox(height: 20),
 
                               // === DOE CHIP (WITH lastChecked) ===

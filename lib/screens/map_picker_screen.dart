@@ -300,7 +300,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                             label: const Text('Confirm'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green.shade600,
-                              foregroundColor: null,
+                              foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),

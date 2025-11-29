@@ -254,7 +254,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
                                   ? Row(
                                       children: [
                                         ElevatedButton.icon(
-                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: null),
+                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
                                           onPressed: selectedIds.isEmpty ? null : () => _confirmDelete(selectedIds.toList()),
                                           icon: const Icon(Icons.delete),
                                           label: const Text('Delete Selected'),
@@ -271,7 +271,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
                                         ElevatedButton(
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: const Color(0xFF0D2236),
-                                            foregroundColor: null,
+                                            foregroundColor: Colors.white,
                                             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                                           ),
                                           onPressed: selectedIds.isEmpty
@@ -342,7 +342,7 @@ class _CartTile extends StatelessWidget {
       onTap: onSelected,
       child: Container(
         decoration: BoxDecoration(
-          color: selected ? Colors.lightBlue.shade50 : null,
+          color: selected ? Colors.lightBlue.shade50 : Colors.white,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: selected ? Colors.blueAccent : Colors.transparent, width: 1.5),
         ),

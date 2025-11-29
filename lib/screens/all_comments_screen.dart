@@ -142,7 +142,7 @@ class _AllCommentsScreenState extends State<AllCommentsScreen> {
               }),
               icon: const Icon(Icons.send, size: 18),
               label: const Text('Submit Report'),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade600, foregroundColor: null),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade600, foregroundColor: Colors.white),
             ),
           ],
         ),
@@ -507,6 +507,7 @@ class _AllCommentsScreenState extends State<AllCommentsScreen> {
                                     icon: const Icon(Icons.reply, size: 18),
                                     label: const Text('Reply'),
                                     style: TextButton.styleFrom(
+                                      foregroundColor: Colors.purple,
                                       padding: const EdgeInsets.symmetric(horizontal: 8),
                                       minimumSize: const Size(0, 36),
                                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,

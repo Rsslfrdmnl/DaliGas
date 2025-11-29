@@ -1,3 +1,5 @@
+import 'dart:html' as html;
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -23,6 +25,87 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   String selectedReportType = "All";
   int _currentPage = 0;
   final int _pageSize = 6;
+
+  void _exportReportsToCsv() async {
+  try {
+    // Fetch all reports
+    final reportsSnapshot = await firestore.collection('reports').get();
+
+    final rows = <List<String>>[];
+
+    // Add header row
+    rows.add([
+      'Report ID',
+      'Type',
+      'Reporter Name',
+      'Reported User',
+      'Reason',
+      'Content',
+      'Status',
+      'Date Submitted'
+    ]);
+
+    for (var doc in reportsSnapshot.docs) {
+      final data = doc.data();
+      final reportId = doc.id;
+      final type = data['type']?.toString() ?? 'Others';
+      final reporterName = data['reporterName']?.toString() ?? 'Unknown';
+      final reportedUserName = data['reportedUserName']?.toString() ?? '';
+      final reason = data['reason']?.toString() ?? '';
+      final content = data['content']?.toString() ?? '';
+      final status = (data['status'] ?? 'pending').toString();
+      final timestamp = (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
+
+      rows.add([
+        reportId,
+        type,
+        reporterName,
+        reportedUserName,
+        reason,
+        content,
+        status,
+        DateFormat('MMMM d, yyyy - hh:mm a').format(timestamp),
+      ]);
+    }
+
+    // Convert to CSV string
+    final csvString = _simpleCsvConvert(rows);
+
+    // Create and download the file
+    final timestamp = DateFormat('yyyy-MM-dd_HH-mm').format(DateTime.now());
+    final blob = html.Blob([utf8.encode(csvString)]);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', 'reports_export_$timestamp.csv')
+      ..click();
+
+    html.Url.revokeObjectUrl(url);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Reports exported successfully (${rows.length - 1} reports)'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error exporting reports: $e')),
+    );
+  }
+}
+
+// Add this helper method for CSV conversion
+String _simpleCsvConvert(List<List<String>> rows) {
+  String escapeCell(String cell) {
+    if (cell.contains('"')) cell = cell.replaceAll('"', '""');
+    if (cell.contains(',') || cell.contains('"') || cell.contains('\n')) {
+      return '"$cell"';
+    }
+    return cell;
+  }
+
+  return rows.map((row) => row.map(escapeCell).join(',')).join('\r\n');
+}
 
   Future<void> _logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
@@ -267,65 +350,70 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                   const SizedBox(height: 30),
 
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          ElevatedButton.icon(
-                            onPressed: () async {
-                              final now = DateTime.now();
-                              final picked = await showDateRangePicker(
-                                context: context,
-                                firstDate: DateTime(now.year - 5),
-                                lastDate: DateTime(now.year + 1),
-                                initialDateRange: selectedDateRange ?? DateTimeRange(start: DateTime(now.year, now.month, 1), end: now),
-                              );
-                              if (picked != null) setState(() => selectedDateRange = picked);
-                            },
-                            icon: const Icon(Icons.date_range, color: Colors.white),
-                            label: Text(
-                              selectedDateRange == null
-                                  ? "Select Date Range"
-                                  : "${DateFormat('MMM d').format(selectedDateRange!.start)} - ${DateFormat('MMM d, yyyy').format(selectedDateRange!.end)}",
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D2236)),
-                          ),
-                          const SizedBox(width: 20),
-                          SizedBox(
-                            width: 220,
-                            child: DropdownButtonFormField<String>(
-                              value: selectedReportType,
-                              decoration: InputDecoration(
-                                filled: true,
-                                fillColor: Color(0xFFF9F6FB),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                              ),
-                              items: const [
-                                DropdownMenuItem(value: "All", child: Text("All Reports")),
-                                DropdownMenuItem(value: "Comment", child: Text("Comment")),
-                                DropdownMenuItem(value: "Reply", child: Text("Reply")),
-                                DropdownMenuItem(value: "Chat", child: Text("Chat")),
-                                DropdownMenuItem(value: "Review", child: Text("Review")),
-                                DropdownMenuItem(value: "Bug", child: Text("Bug")),
-                                DropdownMenuItem(value: "Order Issue", child: Text("Order Issue")),
-                                DropdownMenuItem(value: "Payment Problem", child: Text("Payment Problem")),
-                                DropdownMenuItem(value: "Delivery", child: Text("Delivery")),
-                                DropdownMenuItem(value: "Others", child: Text("Others")),
-                              ],
-                              onChanged: (val) => setState(() => selectedReportType = val!),
-                            ),
-                          ),
-                        ],
-                      ),
-                      ElevatedButton(
-                        onPressed: () {},
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D2236)),
-                        child: const Text("Export", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                      ),
-                    ],
-                  ),
+  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  children: [
+    Row(
+      children: [
+        ElevatedButton.icon(
+          onPressed: () async {
+            final now = DateTime.now();
+            final picked = await showDateRangePicker(
+              context: context,
+              firstDate: DateTime(now.year - 5),
+              lastDate: DateTime(now.year + 1),
+              initialDateRange: selectedDateRange ?? DateTimeRange(start: DateTime(now.year, now.month, 1), end: now),
+            );
+            if (picked != null) setState(() => selectedDateRange = picked);
+          },
+          icon: const Icon(Icons.date_range, color: Colors.white),
+          label: Text(
+            selectedDateRange == null
+                ? "Select Date Range"
+                : "${DateFormat('MMM d').format(selectedDateRange!.start)} - ${DateFormat('MMM d, yyyy').format(selectedDateRange!.end)}",
+            style: const TextStyle(color: Colors.white),
+          ),
+          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D2236)),
+        ),
+        const SizedBox(width: 20),
+        SizedBox(
+          width: 220,
+          child: DropdownButtonFormField<String>(
+            value: selectedReportType,
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: const Color(0xFFF9F6FB),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+            ),
+            items: const [
+              DropdownMenuItem(value: "All", child: Text("All Reports")),
+              DropdownMenuItem(value: "Comment", child: Text("Comment")),
+              DropdownMenuItem(value: "Reply", child: Text("Reply")),
+              DropdownMenuItem(value: "Chat", child: Text("Chat")),
+              DropdownMenuItem(value: "Review", child: Text("Review")),
+              DropdownMenuItem(value: "Bug", child: Text("Bug")),
+              DropdownMenuItem(value: "Order Issue", child: Text("Order Issue")),
+              DropdownMenuItem(value: "Payment Problem", child: Text("Payment Problem")),
+              DropdownMenuItem(value: "Delivery", child: Text("Delivery")),
+              DropdownMenuItem(value: "Others", child: Text("Others")),
+            ],
+            onChanged: (val) => setState(() => selectedReportType = val!),
+          ),
+        ),
+      ],
+    ),
+    ElevatedButton.icon(
+      onPressed: _exportReportsToCsv, // Now calls the functional export method
+      icon: const Icon(Icons.download, size: 18, color: Colors.white),
+      label: const Text("Export Reports", style: TextStyle(color: Colors.white)),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.blue,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+    ),
+  ],
+),
                   const SizedBox(height: 20),
 
                   Expanded(

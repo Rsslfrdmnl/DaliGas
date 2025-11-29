@@ -4,6 +4,10 @@ import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:daligas/web/screens/super_admin/admin_welcome_screen.dart';
 import 'package:daligas/web/main_web.dart';
+import 'package:flutter/services.dart'; // Add this import for Clipboard functionality
+import 'package:csv/csv.dart'; // Add this to pubspec.yaml: csv: ^5.0.2
+import 'dart:typed_data';
+import 'dart:html' as html; // For web file download
 import 'admin_dashboard_screen.dart';
 import 'admin_inventory_screen.dart';
 import 'admin_delivery_screen.dart';
@@ -25,6 +29,77 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
   int currentPage = 0;
   final int itemsPerPage = 6;
   final TextEditingController searchController = TextEditingController();
+
+  void _exportToCsv() async {
+  try {
+    final snapshot = await firestore.collection('orders').get();
+    List<List<dynamic>> csvData = [];
+
+    // Add header row
+    csvData.add([
+      'Order ID',
+      'Customer Name',
+      'Date & Time',
+      'Total Amount',
+      'Payment Method',
+      'Delivery Status',
+      'Items Count'
+    ]);
+
+    for (var doc in snapshot.docs) {
+      final data = doc.data();
+      final userId = data['userId'] as String?;
+      String customerName = 'Unknown User';
+      
+      if (userId != null && userId.isNotEmpty) {
+        try {
+          final userDoc = await firestore.collection('users').doc(userId).get();
+          if (userDoc.exists) {
+            customerName = (userDoc.data() as Map<String, dynamic>?)?['fullName']?.toString() ?? 'Unknown User';
+          }
+        } catch (e) {
+          customerName = 'Error retrieving user';
+        }
+      }
+
+      final createdAt = (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+      final total = (data['total'] ?? 0).toDouble();
+      final paymentMethod = data['paymentMethod'] ?? 'COD';
+      final status = data['deliveryStatus'] ?? 'Processing';
+      final itemsCount = (data['items'] as List<dynamic>?)?.length ?? 0;
+
+      csvData.add([
+        doc.id,
+        customerName,
+        DateFormat('MMMM d, yyyy - hh:mm a').format(createdAt),
+        total.toStringAsFixed(2),
+        paymentMethod.toUpperCase(),
+        status,
+        itemsCount.toString(),
+      ]);
+    }
+
+    // Convert to CSV string
+    String csvString = const ListToCsvConverter().convert(csvData);
+    
+    // Create and download file
+    final blob = html.Blob([csvString]);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', 'orders_export_${DateFormat('yyyy-MM-dd_HH-mm').format(DateTime.now())}.csv')
+      ..click();
+    
+    html.Url.revokeObjectUrl(url);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Orders exported successfully as CSV')),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error exporting orders: $e')),
+    );
+  }
+}
 
   Future<void> _logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
@@ -339,7 +414,7 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
                             ),
 
                             // Orders Table with pagination
-Expanded(
+                            Expanded(
                               child: StreamBuilder<QuerySnapshot>(
                                 stream: firestore.collection('orders').orderBy('createdAt', descending: true).snapshots(),
                                 builder: (context, snapshot) {
@@ -431,11 +506,18 @@ Expanded(
                                                             ),
                                                     ),
                                                     DataCell(
-                                                      GestureDetector(
-                                                        onTap: () => _showOrderDetailsDialog(doc),
-                                                        child: const Text(
-                                                          "See Details",
-                                                          style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline, fontWeight: FontWeight.w600),
+                                                      MouseRegion(
+                                                        cursor: SystemMouseCursors.click, // Ensures click cursor on hover
+                                                        child: GestureDetector(
+                                                          onTap: () => _showOrderDetailsDialog(doc),
+                                                          child: const Text(
+                                                            "See Details",
+                                                            style: TextStyle(
+                                                              color: Colors.blue, 
+                                                              decoration: TextDecoration.underline, 
+                                                              fontWeight: FontWeight.w600,
+                                                            ),
+                                                          ),
                                                         ),
                                                       ),
                                                     ),
@@ -536,14 +618,16 @@ Expanded(
                             const SizedBox(height: 16),
                             Align(
                               alignment: Alignment.centerRight,
-                              child: ElevatedButton(
-                                onPressed: () {},
+                              child: ElevatedButton.icon(
+                                onPressed: _exportToCsv, // Now calls the export function
+                                icon: const Icon(Icons.download, size: 18),
+                                label: const Text("Export Orders as CSV"),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.blue,
-                                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                                 ),
-                                child: const Text("Export as CSV/PDF/Excel", style: TextStyle(color: Colors.white)),
                               ),
                             ),
                           ],
