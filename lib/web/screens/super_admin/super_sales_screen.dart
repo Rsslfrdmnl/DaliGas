@@ -26,11 +26,14 @@ class _SuperSalesScreenState extends State<SuperSalesScreen> {
   final int _itemsPerPage = 1;
 
   Future<void> _logout(BuildContext context) async {
-    await FirebaseAuth.instance.signOut();
-    if (context.mounted) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => AdminWelcomeScreen()));
-    }
+  await FirebaseAuth.instance.signOut();
+
+  if (!context.mounted) {
+    return;
   }
+
+  Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+}
 
   @override
   void dispose() {
@@ -59,10 +62,11 @@ class _SuperSalesScreenState extends State<SuperSalesScreen> {
               _SidebarItem(Icons.inventory, "Inventory", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperInventoryScreen(), transitionDuration: Duration.zero))),
               _SidebarItem(Icons.people, "Employees", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperEmployeesScreen(), transitionDuration: Duration.zero))),
               _SidebarItem(Icons.feedback, "Feedbacks", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperFeedbacksScreen(), transitionDuration: Duration.zero))),
-              _SidebarItem(Icons.assignment, "Reports", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperReportsScreen(), transitionDuration: Duration.zero))),
+              _SidebarItem(Icons.assignment, "Business Reports", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperReportsScreen(), transitionDuration: Duration.zero))),
               _SidebarItem(Icons.settings, "Settings", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperSettingsScreen(), transitionDuration: Duration.zero))),
               const Spacer(),
               _SidebarItem(Icons.logout, "Logout", false, () => _logout(context)),
+              const SizedBox(height: 20),
             ]),
           ),
 

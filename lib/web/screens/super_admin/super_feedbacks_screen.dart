@@ -23,17 +23,20 @@ class _SuperFeedbacksScreenState extends State<SuperFeedbacksScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   int _currentPage = 0;
-  final int _itemsPerPage = 4;
+  final int _itemsPerPage = 6;
 
   final Map<String, String> _productCache = {};
   final Map<String, String> _userCache = {};
 
   Future<void> _logout(BuildContext context) async {
-    await FirebaseAuth.instance.signOut();
-    if (context.mounted) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => AdminWelcomeScreen()));
-    }
+  await FirebaseAuth.instance.signOut();
+
+  if (!context.mounted) {
+    return;
   }
+
+  Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+}
 
   // Export to CSV
   void _exportToCsv() async {
@@ -173,10 +176,11 @@ class _SuperFeedbacksScreenState extends State<SuperFeedbacksScreen> {
               _SidebarItem(Icons.inventory, "Inventory", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperInventoryScreen(), transitionDuration: Duration.zero))),
               _SidebarItem(Icons.people, "Employees", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperEmployeesScreen(), transitionDuration: Duration.zero))),
               _SidebarItem(Icons.feedback, "Feedbacks", true, () {}),
-              _SidebarItem(Icons.assignment, "Reports", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperReportsScreen(), transitionDuration: Duration.zero))),
+              _SidebarItem(Icons.assignment, "Business Reports", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperReportsScreen(), transitionDuration: Duration.zero))),
               _SidebarItem(Icons.settings, "Settings", false, () => Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperSettingsScreen(), transitionDuration: Duration.zero))),
               const Spacer(),
               _SidebarItem(Icons.logout, "Logout", false, () => _logout(context)),
+              const SizedBox(height: 20),
             ]),
           ),
 
@@ -243,10 +247,26 @@ class _SuperFeedbacksScreenState extends State<SuperFeedbacksScreen> {
                             if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
                             var filtered = snapshot.data!.docs.where((doc) {
-                              final data = doc.data() as Map<String, dynamic>;
-                              final comment = (data['review'] ?? data['comment'] ?? '').toString().toLowerCase();
-                              return comment.contains(_searchQuery);
-                            }).toList();
+  final data = doc.data() as Map<String, dynamic>;
+  final comment = (data['review'] ?? data['comment'] ?? '').toString().toLowerCase();
+  final productId = doc.reference.parent.parent!.id;
+  final reviewId = doc.id.substring(0, 8).toUpperCase();
+
+  // Get cached or fallback names
+  final productName = (_productCache[productId] ?? 'unknown product').toLowerCase();
+  final userName = (data['userId'] != null
+      ? (_userCache[data['userId']] ?? 'anonymous')
+      : 'anonymous').toLowerCase();
+
+  final rating = (data['rating'] as num?)?.toInt() ?? 0;
+
+  // Search in ALL these fields
+  return comment.contains(_searchQuery) ||
+         productName.contains(_searchQuery) ||
+         userName.contains(_searchQuery) ||
+         reviewId.contains(_searchQuery.toUpperCase()) ||
+         rating.toString().contains(_searchQuery);
+}).toList();
 
                             final totalPages = (filtered.length / _itemsPerPage).ceil();
                             final start = _currentPage * _itemsPerPage;

@@ -24,14 +24,14 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   final NumberFormat currency = NumberFormat.currency(locale: 'fil_PH', symbol: '₱');
 
   Future<void> _logout(BuildContext context) async {
-    await FirebaseAuth.instance.signOut();
-    if (context.mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => AdminWelcomeScreen()),
-      );
-    }
+  await FirebaseAuth.instance.signOut();
+
+  if (!context.mounted) {
+    return;
   }
+
+  Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+}
 
   Timestamp get _startOfToday => Timestamp.fromDate(
         DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
@@ -118,7 +118,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                     ),
                   );
                 }),
-                _SidebarItem(Icons.assignment, "Reports", false, () {
+                _SidebarItem(Icons.assignment, "Business Reports", false, () {
                   Navigator.pushReplacement(
                     context,
                     PageRouteBuilder(
@@ -140,6 +140,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 }),
                 const Spacer(),
                 _SidebarItem(Icons.logout, "Logout", false, () => _logout(context)),
+                const SizedBox(height: 20),
               ],
             ),
           ),

@@ -135,14 +135,14 @@ String _simpleCsvConvert(List<List<String>> rows) {
 }
 
   Future<void> _logout(BuildContext context) async {
-    await FirebaseAuth.instance.signOut();
-    if (context.mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => AdminWelcomeScreen()),
-      );
-    }
+  await FirebaseAuth.instance.signOut();
+
+  if (!context.mounted) {
+    return;
   }
+
+  Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+}
 
   Future<void> _deleteReview(String productId, String reviewId) async {
     final confirm = await showDialog<bool>(

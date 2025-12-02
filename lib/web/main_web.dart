@@ -187,7 +187,17 @@ class MyWebApp extends StatelessWidget {
           theme: lightTheme,
           darkTheme: darkTheme,
           themeMode: ThemeManager().themeMode,
-          home: const AuthGate(),
+
+          // THIS IS THE ONLY CORRECT WAY
+          initialRoute: '/',
+          routes: {
+            '/': (context) {
+              return const AuthGate();
+            },
+            '/welcome': (context) {
+              return AdminWelcomeScreen();
+            },
+          },
         );
       },
     );
@@ -205,6 +215,7 @@ class AuthGate extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
+
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
@@ -213,7 +224,62 @@ class AuthGate extends StatelessWidget {
           return AdminWelcomeScreen();
         }
 
-        return _RoleChecker(user: snapshot.data!);
+        return RoleChecker(user: snapshot.data!);
+      },
+    );
+  }
+}
+
+class RoleChecker extends StatelessWidget {
+  final User user;
+  const RoleChecker({super.key, required this.user});
+
+  Future<Widget> _getDestination() async {
+    try {
+      final doc = await firestore.collection('admins').doc(user.uid).get();
+
+      if (!doc.exists) {
+        await FirebaseAuth.instance.signOut();
+        return AdminWelcomeScreen();
+      }
+
+      final role = doc.data()?['role'] as String?;
+
+      // Valid roles only
+      if (role == 'super') {
+        return const SuperAdminDashboard();
+      } else if (role == 'admin') {
+        return const AdminDashboardScreen();
+      } else {
+        await FirebaseAuth.instance.signOut();
+        return AdminWelcomeScreen();
+      }
+    } catch (e) {
+      await FirebaseAuth.instance.signOut();
+      return AdminWelcomeScreen();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Widget>(
+      future: _getDestination(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+
+        final destination = snapshot.data ?? AdminWelcomeScreen();
+
+        // Execute navigation after build
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => destination),
+            (route) => false,
+          );
+        });
+
+        return const Scaffold(body: Center(child: CircularProgressIndicator()));
       },
     );
   }

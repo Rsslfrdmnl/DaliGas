@@ -8,8 +8,10 @@ import 'super_dashboard_screen.dart';
 import 'package:daligas/web/screens/sub_admin/admin_dashboard_screen.dart';
 
 class AdminWelcomeScreen extends StatefulWidget {
+  const AdminWelcomeScreen({super.key}); // ← better practice
+
   @override
-  _AdminWelcomeScreenState createState() => _AdminWelcomeScreenState();
+  State<AdminWelcomeScreen> createState() => _AdminWelcomeScreenState();
 }
 
 class _AdminWelcomeScreenState extends State<AdminWelcomeScreen> {
