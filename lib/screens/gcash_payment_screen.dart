@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:daligas/screens/order_success_screen.dart';
 import 'package:daligas/screens/home_screen.dart';
+import 'package:daligas/main_mobile.dart';
 import 'dart:async';
 
 class GcashPaymentScreen extends StatefulWidget {
@@ -110,13 +111,13 @@ class _GcashPaymentScreenState extends State<GcashPaymentScreen> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      final cartRef = FirebaseFirestore.instance
+      final cartRef = firestore
           .collection('cart')
           .doc(user.uid)
           .collection('items');
 
       final snapshot = await cartRef.get();
-      final batch = FirebaseFirestore.instance.batch();
+      final batch = firestore.batch();
       for (var doc in snapshot.docs) {
         batch.delete(doc.reference);
       }
@@ -128,7 +129,7 @@ class _GcashPaymentScreenState extends State<GcashPaymentScreen> {
 
   Future<void> _markOrderAsPaid() async {
     try {
-      await FirebaseFirestore.instance
+      await firestore
           .collection('orders')
           .doc(widget.pendingOrderId)
           .update({
@@ -150,7 +151,7 @@ class _GcashPaymentScreenState extends State<GcashPaymentScreen> {
 
     // Cancel order in Firestore
     try {
-      final orderRef = FirebaseFirestore.instance
+      final orderRef = firestore
           .collection('orders')
           .doc(widget.pendingOrderId);
 
@@ -165,8 +166,8 @@ class _GcashPaymentScreenState extends State<GcashPaymentScreen> {
       final orderSnap = await orderRef.get();
       if (orderSnap.exists) {
         final items = orderSnap.data()?['items'] as List<dynamic>? ?? [];
-        final batch = FirebaseFirestore.instance.batch();
-        final productCollection = FirebaseFirestore.instance.collection('products');
+        final batch = firestore.batch();
+        final productCollection = firestore.collection('products');
 
         for (var item in items) {
           final productId = item['productId'] ?? item['id'];

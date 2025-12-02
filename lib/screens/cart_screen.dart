@@ -69,14 +69,14 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
   }
 
   Future<void> updateQuantity(String id, int qty) async {
-    if (user == null) return;
-    await firestore
-        .collection('cart')
-        .doc(user!.uid)
-        .collection('items')
-        .doc(id)
-        .update({'qty': qty});
-  }
+  if (user == null) return;
+  await firestore
+      .collection('cart')
+      .doc(user!.uid)
+      .collection('items')
+      .doc(id)
+      .update({'quantity': qty}); // ← CHANGED FROM 'qty' TO 'quantity'
+}
 
   Future<void> _deleteSelectedItems(List<String> ids) async {
     if (user == null) return;
@@ -167,7 +167,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
                           final data = doc.data() as Map<String, dynamic>;
                           if (selectedIds.contains(doc.id)) {
                             final price = (data['price'] ?? 0).toDouble();
-                            final qty = (data['qty'] ?? 1) as int;
+                            final qty = (data['quantity'] ?? data['qty'] ?? 1) as int;
                             total += price * qty;
                             totalQty += qty;
                           }
@@ -225,7 +225,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
                                         id: doc.id,
                                         title: data['title'] ?? 'Unnamed Product',
                                         price: (data['price'] ?? 0).toDouble(),
-                                        qty: data['qty'] ?? 1,
+                                        qty: (data['quantity'] ?? data['qty'] ?? 1) as int,
                                         imageUrl: data['imageUrl'] ?? '',
                                         selected: isSelected,
                                         onSelected: isDeleting ? null : () {
@@ -233,12 +233,11 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
                                             isSelected ? selectedIds.remove(doc.id) : selectedIds.add(doc.id);
                                           });
                                         },
-                                        onIncrement: () => updateQuantity(doc.id, (data['qty'] ?? 1) + 1),
-                                        onDecrement: () {
-                                          if ((data['qty'] ?? 1) > 1) {
-                                            updateQuantity(doc.id, (data['qty'] ?? 1) - 1);
-                                          }
-                                        },
+                                        onIncrement: () => updateQuantity(doc.id, ((data['quantity'] ?? data['qty'] ?? 1) as int) + 1),
+onDecrement: () {
+  final current = (data['quantity'] ?? data['qty'] ?? 1) as int;
+  if (current > 1) updateQuantity(doc.id, current - 1);
+},
                                       ),
                                     ),
                                   );
@@ -280,10 +279,10 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
                                                   final selectedDocs = items.where((doc) => selectedIds.contains(doc.id)).map((doc) {
                                                     final data = doc.data() as Map<String, dynamic>;
                                                     return {
-                                                      'id': doc.id,
+                                                      'productId': data['productId'] ?? doc.id,
                                                       'name': data['title'] ?? '', // ← FIXED: 'name' for CheckoutScreen
                                                       'price': data['price'] ?? 0,
-                                                      'quantity': data['qty'] ?? 1,
+                                                      'quantity': (data['quantity'] ?? data['qty'] ?? 1) as int,
                                                       'imageUrl': data['imageUrl'] ?? '',
                                                     };
                                                   }).toList();

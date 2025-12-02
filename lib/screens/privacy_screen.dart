@@ -113,8 +113,8 @@ class PrivacyScreen extends StatelessWidget {
                       SectionTitle('8. Contact Us'),
                       SectionText(
                         'If you have questions about our Terms or Privacy Policy, you may contact us at:\n'
-                        '📧 [Insert Support Email]\n'
-                        '📞 [Insert Hotline Number]',
+                        '📧 daligas@gmail.com\n'
+                        '📞 +63 921 861 8380',
                       ),
                     ],
                   ),

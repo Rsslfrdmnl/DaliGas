@@ -19,66 +19,75 @@ class _AdminWelcomeScreenState extends State<AdminWelcomeScreen> {
 
   bool loading = false;
 
-  // The login logic – unchanged
   Future<void> _login() async {
-  if (loading) return; // prevent double tap
+    if (loading) return;
+    setState(() => loading = true);
 
-  setState(() => loading = true);
+    try {
 
-  try {
-    // 1. Firebase Auth login
-    final userCredential = await _auth.signInWithEmailAndPassword(
-      email: _usernameController.text.trim(),
-      password: _passwordController.text.trim(),
-    );
-
-    // 2. Firestore role check
-    final uid = userCredential.user!.uid;
-    final doc = await FirebaseFirestore.instance
-        .collection('admins')
-        .doc(uid)
-        .get();
-
-    // Critical: Check if widget is still mounted after await!
-    if (!mounted) return;
-
-    if (!doc.exists || !doc.data()!.containsKey('role')) {
-      throw Exception("No role assigned. Contact system administrator.");
-    }
-
-    final role = doc['role'] as String;
-
-    // Safe to use context now
-    if (role == "super") {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => SuperAdminDashboard()),
+      // 1. Firebase Auth login
+      final userCredential = await _auth.signInWithEmailAndPassword(
+        email: _usernameController.text.trim(),
+        password: _passwordController.text.trim(),
       );
-    } else if (role == "admin") {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => AdminDashboardScreen()),
-      );
-    } else {
-      throw Exception("Invalid role detected.");
-    }
-  } catch (e) {
-    // Also check mounted before showing SnackBar!
-    if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("Login failed: ${e.toString()}"),
-        backgroundColor: Colors.red,
-      ),
-    );
-  } finally {
-    // Only update loading if still mounted
-    if (mounted) {
-      setState(() => loading = false);
+      final uid = userCredential.user!.uid;
+
+      // 2. Firestore role check
+      final doc = await FirebaseFirestore.instance
+          .collection('admins')
+          .doc(uid)
+          .get();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (!doc.exists || !doc.data()!.containsKey('role')) {
+        await _auth.signOut();
+        throw Exception("No role assigned. Contact system administrator.");
+      }
+
+      final role = doc.data()!['role'] as String;
+
+      // ─────────────── NAVIGATION ───────────────
+      if (role == "super") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const SuperAdminDashboard()),
+        );
+      } else if (role == "admin") {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
+        );
+      } else {
+        await _auth.signOut();
+        throw Exception("Invalid role detected.");
+      }
+    } on FirebaseAuthException catch (e) {
+      String msg = "Login failed";
+      if (e.code == 'user-not-found') msg = "No user found with this email";
+      else if (e.code == 'wrong-password') msg = "Wrong password";
+      else if (e.code == 'invalid-email') msg = "Invalid email format";
+      else if (e.code == 'too-many-requests') msg = "Too many attempts. Try again later.";
+
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: Colors.red),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Login failed: $e"), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => loading = false);
+      }
     }
   }
-}
 
   @override
   Widget build(BuildContext context) {
@@ -119,7 +128,6 @@ class _AdminWelcomeScreenState extends State<AdminWelcomeScreen> {
               ),
               const SizedBox(height: 24),
 
-              // Email field – submit on Enter
               TextField(
                 controller: _usernameController,
                 textInputAction: TextInputAction.next,
@@ -127,30 +135,26 @@ class _AdminWelcomeScreenState extends State<AdminWelcomeScreen> {
                 decoration: const InputDecoration(
                   hintText: "Email",
                   filled: true,
-                  fillColor: null,
+                  fillColor: Colors.white,
                   border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 12),
 
-              // Password field – submit on Enter
               TextField(
                 controller: _passwordController,
                 obscureText: true,
                 textInputAction: TextInputAction.done,
-                onSubmitted: (_) {
-                  if (!loading) _login();
-                },
+                onSubmitted: (_) => loading ? null : _login(),
                 decoration: const InputDecoration(
                   hintText: "Password",
                   filled: true,
-                  fillColor: null,
+                  fillColor: Colors.white,
                   border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 20),
 
-              // Login button
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red,
@@ -159,10 +163,7 @@ class _AdminWelcomeScreenState extends State<AdminWelcomeScreen> {
                 onPressed: loading ? null : _login,
                 child: loading
                     ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text(
-                        "Login",
-                        style: TextStyle(color: Colors.white),
-                      ),
+                    : const Text("Login", style: TextStyle(color: Colors.white, fontSize:  18)),
               ),
             ],
           ),

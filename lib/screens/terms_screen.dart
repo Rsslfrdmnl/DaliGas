@@ -117,8 +117,8 @@ class TermsScreen extends StatelessWidget {
                       SectionTitle('9. Contact Us'),
                       SectionText(
                         'If you have questions regarding these Terms, please reach out to us at:\n'
-                        '📧 [Insert Support Email]\n'
-                        '📞 [Insert Hotline Number]',
+                        '📧 daligas@gmail.com\n'
+                        '📞 +63 921 861 8380',
                       ),
                     ],
                   ),

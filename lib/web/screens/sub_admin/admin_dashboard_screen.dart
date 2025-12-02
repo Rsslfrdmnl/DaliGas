@@ -20,18 +20,16 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
-  // REMOVED: StreamSubscription list & dispose() → causes crash on Web
-  // ← These two lines were the only culprits left
 
   Future<void> _logout(BuildContext context) async {
-    await FirebaseAuth.instance.signOut();
-    if (context.mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => AdminWelcomeScreen()),
-      );
-    }
+  await FirebaseAuth.instance.signOut();
+
+  if (!context.mounted) {
+    return;
   }
+
+  Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+}
 
   Widget _buildSidebar(BuildContext context) {
     return Container(

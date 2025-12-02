@@ -567,6 +567,7 @@ class PurchasesTab extends StatelessWidget {
 // EXACT SAME LOGIC AS IN ORDER_DETAILS_SCREEN (NOW REUSED)
 // ──────────────────────────────────────────────────────────────
 
+// CANCEL ORDER — PURCHASES SCREEN (FINAL FIXED VERSION)
 Future<void> _cancelOrder(BuildContext context, String orderId, List<Map<String, dynamic>> items) async {
   final confirm = await showDialog<bool>(
     context: context,
@@ -575,14 +576,8 @@ Future<void> _cancelOrder(BuildContext context, String orderId, List<Map<String,
       title: const Text('Cancel Order', style: TextStyle(color: Colors.white)),
       content: const Text('Are you sure you want to cancel this order?', style: TextStyle(color: Colors.white70)),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('No', style: TextStyle(color: Colors.white70)),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Yes', style: TextStyle(color: Colors.red)),
-        ),
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('No', style: TextStyle(color: Colors.white70))),
+        TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Yes', style: TextStyle(color: Colors.red))),
       ],
     ),
   );
@@ -590,12 +585,7 @@ Future<void> _cancelOrder(BuildContext context, String orderId, List<Map<String,
   if (confirm != true || !context.mounted) return;
 
   try {
-    // Fetch fresh order data to check payment method/status
-    final orderDoc = await firestore
-        .collection('orders')
-        .doc(orderId)
-        .get();
-
+    final orderDoc = await firestore.collection('orders').doc(orderId).get();
     if (!orderDoc.exists) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Order not found'), backgroundColor: Colors.red),
@@ -603,113 +593,57 @@ Future<void> _cancelOrder(BuildContext context, String orderId, List<Map<String,
       return;
     }
 
-    final paymentMethod = orderDoc['paymentMethod']?.toString() ?? 'cod';
-    final paymentStatus = orderDoc['paymentStatus']?.toString() ?? 'Pending';
+    final paymentMethod = (orderDoc['paymentMethod'] ?? 'cod').toString().toLowerCase();
+    final paymentStatus = (orderDoc['paymentStatus'] ?? 'Pending').toString();
 
-    final orderRef = orderDoc.reference;
     final batch = firestore.batch();
+    final orderRef = orderDoc.reference;
 
-    if (paymentMethod == 'GCash' && paymentStatus == 'Paid') {
-      // Trigger refund via Cloud Function
+    // If GCash already paid → trigger refund first
+    if (paymentMethod == 'gcash' && paymentStatus == 'Paid') {
       try {
         await FirebaseFunctions.instance
             .httpsCallable('refundGcashPayment')
             .call({'orderId': orderId, 'reason': 'Customer cancelled'});
 
-        // Only update Firestore after successful refund
         batch.update(orderRef, {
           'deliveryStatus': 'Cancelled',
           'paymentStatus': 'Refunded',
           'cancelledAt': FieldValue.serverTimestamp(),
           'cancelReason': 'Customer cancelled',
         });
-
-        // Restore stock
-        for (final item in items) {
-          final productId = item['productId'] ?? item['id'];
-          final qty = (item['quantity'] ?? 1) as int;
-          if (productId != null && productId is String) {
-            final productRef = firestore.collection('products').doc(productId);
-            batch.update(productRef, {'stock': FieldValue.increment(qty)});
-          }
-        }
-
-        await batch.commit();
-
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Order cancelled & refund processed!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Refund failed: $e'), backgroundColor: Colors.red),
           );
         }
-        return; // Abort cancellation if refund fails
+        return;
       }
     } else {
-      // COD, unpaid GCash, or other → just cancel normally
+      // Normal cancel (COD or unpaid GCash)
       batch.update(orderRef, {
         'deliveryStatus': 'Cancelled',
-        'paymentStatus': paymentMethod == 'GCash' ? 'Refunded' : 'Cancelled',
+        'paymentStatus': paymentMethod == 'gcash' ? 'Refunded' : 'Cancelled',
         'cancelledAt': FieldValue.serverTimestamp(),
         'cancelReason': 'Customer cancelled',
       });
-
-      // Restore stock
-      for (final item in items) {
-        final productId = item['productId'] ?? item['id'];
-        final qty = (item['quantity'] ?? 1) as int;
-        if (productId != null && productId is String) {
-          final productRef = firestore.collection('products').doc(productId);
-          batch.update(productRef, {'stock': FieldValue.increment(qty)});
-        }
-      }
-
-      await batch.commit();
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Order cancelled successfully!'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
     }
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to cancel order: $e'), backgroundColor: Colors.red),
-      );
-    }
-  }
-}
 
-Future<void> _buyAgain(BuildContext context, List<Map<String, dynamic>> items) async {
-  try {
-    final userId = FirebaseAuth.instance.currentUser!.uid;
-    final batch = firestore.batch();
-    final cartItemsRef = firestore
-        .collection('carts')
-        .doc(userId)
-        .collection('items');
-
+    // Restore stock — safely (skip deleted products)
     for (final item in items) {
-      final docRef = cartItemsRef.doc(); // let Firestore generate ID
-      batch.set(docRef, {
-        'title': item['name'],
-        'price': item['price'],
-        'qty': item['quantity'],
-        'imageUrl': item['imageUrl'],
-        'productId': item['productId'],
-        'addedAt': FieldValue.serverTimestamp(),
-      });
+      final productId = item['productId'] ?? item['id'];
+      if (productId == null || productId is! String) continue;
+
+      final productSnap = await firestore.collection('products').doc(productId).get();
+      if (!productSnap.exists) {
+        debugPrint('Cancel: Skipping restock → product deleted: $productId');
+        continue;
+      }
+
+      final qty = (item['quantity'] ?? item['qty'] ?? 1) as int;
+      final productRef = firestore.collection('products').doc(productId);
+      batch.update(productRef, {'stock': FieldValue.increment(qty)});
     }
 
     await batch.commit();
@@ -717,12 +651,80 @@ Future<void> _buyAgain(BuildContext context, List<Map<String, dynamic>> items) a
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Items added to cart!'),
+          content: Text('Order cancelled successfully!'),
           backgroundColor: Colors.green,
-          duration: Duration(seconds: 2),
         ),
       );
+    }
+  } catch (e) {
+    debugPrint('Cancel order error: $e');
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to cancel: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+}
 
+// BUY AGAIN — PURCHASES SCREEN (FINAL FIXED VERSION)
+Future<void> _buyAgain(BuildContext context, List<Map<String, dynamic>> items) async {
+  final userId = FirebaseAuth.instance.currentUser?.uid;
+  if (userId == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please log in first')),
+    );
+    return;
+  }
+
+  try {
+    final batch = firestore.batch();
+    final cartRef = firestore.collection('cart').doc(userId).collection('items');
+
+    int addedCount = 0;
+
+    for (final item in items) {
+      final productId = item['productId'] ?? item['id'];
+      if (productId == null || productId is! String) continue;
+
+      // Skip deleted products
+      final productSnap = await firestore.collection('products').doc(productId).get();
+      if (!productSnap.exists) {
+        debugPrint('Buy Again: Skipping deleted product → $productId');
+        continue;
+      }
+
+      final docRef = cartRef.doc();
+      batch.set(docRef, {
+        'productId': productId,
+        'title': item['name'],
+        'price': (item['price'] ?? 0).toDouble(),
+        'quantity': (item['quantity'] ?? item['qty'] ?? 1) as int,  // ← correct key
+        'imageUrl': item['imageUrl'] ?? '',
+        'addedAt': FieldValue.serverTimestamp(),
+      });
+      addedCount++;
+    }
+
+    if (addedCount == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No items available to add (products may have been removed)'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    await batch.commit();
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Added $addedCount item(s) to cart!'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const cart.CartScreen()),

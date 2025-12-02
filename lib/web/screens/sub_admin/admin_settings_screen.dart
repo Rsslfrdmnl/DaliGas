@@ -129,14 +129,14 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
 }
 
   Future<void> _logout(BuildContext context) async {
-    await FirebaseAuth.instance.signOut();
-    if (context.mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => AdminWelcomeScreen()),
-      );
-    }
+  await FirebaseAuth.instance.signOut();
+
+  if (!context.mounted) {
+    return;
   }
+
+  Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+}
 
   Widget _buildSidebar(BuildContext context) {
     return Container(

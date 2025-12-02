@@ -23,13 +23,19 @@ class _SuperInventoryScreenState extends State<SuperInventoryScreen> {
   int _currentPage = 0; // For pagination
 
   Future<void> _logout(BuildContext context) async {
-    await FirebaseAuth.instance.signOut();
-    if (context.mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => AdminWelcomeScreen()),
-      );
-    }
+  await FirebaseAuth.instance.signOut();
+
+  if (!context.mounted) {
+    return;
+  }
+
+  Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+}
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -93,7 +99,7 @@ class _SuperInventoryScreenState extends State<SuperInventoryScreen> {
                     PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperFeedbacksScreen(), transitionDuration: Duration.zero),
                   );
                 }),
-                _SidebarItem(Icons.assignment, "Reports", false, () {
+                _SidebarItem(Icons.assignment, "Business Reports", false, () {
                   Navigator.pushReplacement(
                     context,
                     PageRouteBuilder(pageBuilder: (_, __, ___) => const SuperReportsScreen(), transitionDuration: Duration.zero),
@@ -107,6 +113,7 @@ class _SuperInventoryScreenState extends State<SuperInventoryScreen> {
                 }),
                 const Spacer(),
                 _SidebarItem(Icons.logout, "Logout", false, () => _logout(context)),
+                const SizedBox(height: 20),
               ],
             ),
           ),

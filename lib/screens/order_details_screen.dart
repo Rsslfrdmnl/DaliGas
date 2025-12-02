@@ -581,63 +581,122 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   Future<void> _cancelOrder() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Cancel Order'),
-        content: const Text('Are you sure you want to cancel this order?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('No')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Yes', style: TextStyle(color: Colors.red))),
-        ],
-      ),
-    );
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      backgroundColor: const Color(0xFF052238),
+      title: const Text('Cancel Order', style: TextStyle(color: Colors.white)),
+      content: const Text('Are you sure you want to cancel this order?', style: TextStyle(color: Colors.white70)),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('No', style: TextStyle(color: Colors.white70))),
+        TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Yes', style: TextStyle(color: Colors.red))),
+      ],
+    ),
+  );
 
-    if (confirm != true || !mounted) return;
+  if (confirm != true || !mounted) return;
 
-    try {
-      final batch = firestore.batch();
-      final orderRef = firestore.collection('orders').doc(widget.orderId);
-      batch.update(orderRef, {'deliveryStatus': 'Cancelled', 'paymentStatus': 'Refunded'});
-
-      for (final item in widget.items) {
-        final productId = item['productId'];
-        final qty = (item['quantity'] ?? 1) as int;
-        final productRef = firestore.collection('products').doc(productId);
-        batch.update(productRef, {'stock': FieldValue.increment(qty)});
-      }
-
-      await batch.commit();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Order cancelled and stocks restored!'), backgroundColor: Colors.orange));
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to cancel order: $e')));
-    }
-  }
-
-  Future<void> _buyAgain() async {
+  try {
     final batch = firestore.batch();
-    final cartRef = firestore.collection('cart').doc(FirebaseAuth.instance.currentUser!.uid).collection('items');
+    final orderRef = firestore.collection('orders').doc(widget.orderId);
 
+    // Update order status
+    batch.update(orderRef, {
+      'deliveryStatus': 'Cancelled',
+      'cancelledAt': FieldValue.serverTimestamp(),
+      'cancelReason': 'Customer cancelled',
+    });
+
+    // Restore stock — safely (skip deleted products)
     for (final item in widget.items) {
-      final docRef = cartRef.doc();
-      batch.set(docRef, {
-        'title': item['name'],
-        'price': item['price'],
-        'qty': item['quantity'],
-        'imageUrl': item['imageUrl'],
-        'productId': item['productId'],
-      });
+      final productId = item['productId'] ?? item['id'];
+      if (productId == null || productId is! String) continue;
+
+      // Check if product still exists
+      final productSnap = await firestore.collection('products').doc(productId).get();
+      if (!productSnap.exists) {
+        debugPrint('Cancel: Skipping restock for deleted product → $productId');
+        continue; // Prevents NOT_FOUND error
+      }
+
+      final qty = (item['quantity'] ?? item['qty'] ?? 1) as int;
+      final productRef = firestore.collection('products').doc(productId);
+      batch.update(productRef, {'stock': FieldValue.increment(qty)});
     }
 
     await batch.commit();
+
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Items added to cart!'), backgroundColor: Colors.green));
-      Navigator.push(context, MaterialPageRoute(builder: (_) => const cart.CartScreen()));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Order cancelled and stock restored!'), backgroundColor: Colors.green),
+      );
+      Navigator.pop(context); // Go back to purchases list
+    }
+  } catch (e) {
+    debugPrint('Cancel order error: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to cancel: $e'), backgroundColor: Colors.red),
+      );
     }
   }
+}
+
+  Future<void> _buyAgain() async {
+  final userId = FirebaseAuth.instance.currentUser?.uid;
+  if (userId == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please log in again')),
+    );
+    return;
+  }
+
+  final batch = firestore.batch();
+  final cartRef = firestore.collection('cart').doc(userId).collection('items');
+
+  int addedCount = 0;
+
+  for (final item in widget.items) {
+    final productId = item['productId'] ?? item['id'];
+    if (productId == null || productId is! String) continue;
+
+    // Skip if product was deleted (prevents silent fail + NOT_FOUND later)
+    final productSnap = await firestore.collection('products').doc(productId).get();
+    if (!productSnap.exists) {
+      debugPrint('Buy Again: Skipping deleted product → $productId');
+      continue;
+    }
+
+    final docRef = cartRef.doc();
+    batch.set(docRef, {
+      'productId': productId,
+      'title': item['name'],
+      'price': (item['price'] ?? 0).toDouble(),
+      'quantity': (item['quantity'] ?? item['qty'] ?? 1) as int,  // ← correct key
+      'imageUrl': item['imageUrl'] ?? '',
+      'addedAt': FieldValue.serverTimestamp(),
+    });
+    addedCount++;
+  }
+
+  if (addedCount == 0) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No items available (products may have been removed)')),
+      );
+    }
+    return;
+  }
+
+  await batch.commit();
+
+  if (mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Added $addedCount item(s) to cart!'), backgroundColor: Colors.green),
+    );
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const cart.CartScreen()));
+  }
+}
 
   Future<void> _checkIfReviewed() async {
     for (final item in widget.items) {
