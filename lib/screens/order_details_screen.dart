@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geocoding/geocoding.dart';
@@ -10,9 +11,11 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:daligas/services/firebase_functions.dart';
 import 'package:daligas/screens/review_order_screen.dart';
 import 'package:daligas/screens/cart_screen.dart' as cart;
 import 'package:daligas/screens/chat_screen.dart';
+import 'package:daligas/screens/checkout_screen.dart';
 import 'package:daligas/main_mobile.dart';
 
 const String GOOGLE_MAPS_API_KEY = 'AIzaSyAVDDHYb29rt4io-HI0Uq6vfv_GAnlDLlw';
@@ -38,7 +41,7 @@ class FullScreenMapScreen extends StatefulWidget {
 
 class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   GoogleMapController? _mapController;
-  LatLng _driverLocation = const LatLng(14.5995, 120.9842);
+  late LatLng _driverLocation;
   LatLng? _previousLocation;
   bool _isIconLoaded = false;
   bool _isRouteLoading = false;
@@ -47,29 +50,40 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   String _routeInfo = '';
   static BitmapDescriptor? _cachedTruckIcon;
 
+  bool _mapReady = false; // ← THIS IS THE KEY
+
   @override
-void initState() {
-  super.initState();
+  void initState() {
+    super.initState();
+    _driverLocation = widget.driverLocation;
+    _previousLocation = _driverLocation;
 
-  // ← FIX: Use passed driver location
-  _driverLocation = widget.driverLocation;
-  _previousLocation = _driverLocation;
+    _loadDriverIconFromFirebase();
+    _listenToDriverLocation();
+  }
 
-  _loadDriverIconFromFirebase();
-  _listenToDriverLocation();
+  @override
+  void didUpdateWidget(covariant FullScreenMapScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // In case parent passes a new driverLocation (rare but safe)
+    if (widget.driverLocation != oldWidget.driverLocation) {
+      _driverLocation = widget.driverLocation;
+      _previousLocation = null;
+      if (_mapReady) _forceRefreshEverything();
+    }
+  }
 
-  // Force initial marker + route
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    _updateMarkers(); // ← ADD THIS
+  void _forceRefreshEverything() {
+    _updateMarkers();
     if (_driverLocation.latitude != 14.5995 && widget.customerLocation.latitude != 14.5995) {
       _fetchRoute();
     }
-  });
-}
+  }
 
   Future<void> _loadDriverIconFromFirebase() async {
     if (_cachedTruckIcon != null) {
       setState(() => _isIconLoaded = true);
+      if (_mapReady) _updateMarkers();
       return;
     }
     try {
@@ -84,10 +98,12 @@ void initState() {
         );
         final frame = await codec.getNextFrame();
         final byteData = await frame.image.toByteData(format: ui.ImageByteFormat.png);
-        final bitmap = BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
-        _cachedTruckIcon = bitmap;
-        if (mounted) setState(() => _isIconLoaded = true);
-        _updateMarkers(); // ← ADD THIS
+        _cachedTruckIcon = BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+
+        if (mounted) {
+          setState(() => _isIconLoaded = true);
+          if (_mapReady) _updateMarkers();
+        }
       }
     } catch (e) {
       debugPrint('Truck icon load failed: $e');
@@ -110,15 +126,19 @@ void initState() {
       setState(() {
         _previousLocation = _driverLocation;
         _driverLocation = newLoc;
-        _updateMarkers();
       });
 
-      _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
-      if (widget.customerLocation.latitude != 14.5995) _fetchRoute();
+      if (_mapReady) {
+        _updateMarkers();
+        _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
+        if (widget.customerLocation.latitude != 14.5995) _fetchRoute();
+      }
     });
   }
 
   void _updateMarkers() {
+    if (!_mapReady) return;
+
     double rotation = 0;
     if (_previousLocation != null) {
       rotation = Geolocator.bearingBetween(
@@ -129,26 +149,33 @@ void initState() {
       );
     }
 
-    _markers = {
-      Marker(
-        markerId: const MarkerId('customer'),
-        position: widget.customerLocation,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-      ),
-      if (_isIconLoaded && _cachedTruckIcon != null)
+    setState(() {
+      _markers = {
         Marker(
-          markerId: const MarkerId('driver'),
-          position: _driverLocation,
-          icon: _cachedTruckIcon!,
-          anchor: const Offset(0.5, 0.5),
-          rotation: rotation,
-          zIndex: 10,
+          markerId: const MarkerId('customer'),
+          position: widget.customerLocation,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: const InfoWindow(title: 'Delivery Address'),
         ),
-    };
+        if (_isIconLoaded && _cachedTruckIcon != null)
+          Marker(
+            markerId: const MarkerId('driver'),
+            position: _driverLocation,
+            icon: _cachedTruckIcon!,
+            anchor: const Offset(0.5, 0.5),
+            rotation: rotation,
+            zIndex: 10,
+          ),
+      };
+    });
   }
 
   Future<void> _fetchRoute() async {
-    if (_driverLocation.latitude == 14.5995 || widget.customerLocation.latitude == 14.5995 || _isRouteLoading) return;
+    if (!_mapReady ||
+        _driverLocation.latitude == 14.5995 ||
+        widget.customerLocation.latitude == 14.5995 ||
+        _isRouteLoading) return;
+
     setState(() => _isRouteLoading = true);
 
     final origin = '${_driverLocation.latitude},${_driverLocation.longitude}';
@@ -159,11 +186,11 @@ void initState() {
       '&destination=$destination'
       '&mode=driving'
       '&region=ph'
-      '&key=$GOOGLE_MAPS_API_KEY'
+      '&key=$GOOGLE_MAPS_API_KEY',
     );
 
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 10));
+      final response = await http.get(url).timeout(const Duration(seconds: 12));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'OK' && data['routes'].isNotEmpty) {
@@ -178,8 +205,9 @@ void initState() {
               Polyline(
                 polylineId: const PolylineId('route'),
                 points: points,
-                color: Colors.blue,
-                width: 5,
+                color: Colors.blueAccent,
+                width: 6,
+                patterns: [PatternItem.dash(20), PatternItem.gap(10)], // ← optional dashed style
               ),
             };
           });
@@ -187,9 +215,9 @@ void initState() {
         }
       }
     } catch (e) {
-      debugPrint('Route fetch failed: $e');
+      debugPrint('Route error: $e');
     } finally {
-      setState(() => _isRouteLoading = false);
+      if (mounted) setState(() => _isRouteLoading = false);
     }
   }
 
@@ -237,30 +265,51 @@ void initState() {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Live Tracking - #${widget.orderId.substring(widget.orderId.length - 12)}'),
+        title: Text('Live Tracking • #${widget.orderId.substring(widget.orderId.length - 8)}'),
         backgroundColor: const Color(0xFF052238),
         foregroundColor: Colors.white,
       ),
       body: Stack(
         children: [
           GoogleMap(
-            initialCameraPosition: CameraPosition(target: widget.customerLocation, zoom: 14),
+            initialCameraPosition: CameraPosition(
+              target: widget.customerLocation.latitude != 14.5995
+                  ? widget.customerLocation
+                  : _driverLocation,
+              zoom: 15,
+            ),
             markers: _markers,
             polylines: _polylines,
             myLocationEnabled: false,
             myLocationButtonEnabled: true,
             zoomControlsEnabled: true,
-            onMapCreated: (c) => _mapController = c,
+            onMapCreated: (GoogleMapController controller) {
+              _mapController = controller;
+              setState(() => _mapReady = true); // ← THIS IS CRUCIAL
+              
+              // NOW everything is safe to run
+              _updateMarkers();
+              if (_driverLocation.latitude != 14.5995 && widget.customerLocation.latitude != 14.5995) {
+                _fetchRoute();
+              }
+            },
           ),
-          if (_isRouteLoading) const Center(child: CircularProgressIndicator(color: Colors.white)),
+          if (_isRouteLoading)
+            const Center(child: CircularProgressIndicator(color: Colors.white)),
           if (_routeInfo.isNotEmpty)
             Positioned(
               top: 16,
               left: 16,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(16)),
-                child: Text(_routeInfo, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  _routeInfo,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
               ),
             ),
         ],
@@ -642,60 +691,52 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 }
 
-  Future<void> _buyAgain() async {
-  final userId = FirebaseAuth.instance.currentUser?.uid;
-  if (userId == null) {
+Future<void> _buyAgain() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Please log in again')),
+      const SnackBar(content: Text('Please log in again'), backgroundColor: Colors.red),
     );
     return;
   }
 
-  final batch = firestore.batch();
-  final cartRef = firestore.collection('cart').doc(userId).collection('items');
-
-  int addedCount = 0;
-
+  // Collect valid items (skip deleted products)
+  final List<Map<String, dynamic>> validItems = [];
   for (final item in widget.items) {
     final productId = item['productId'] ?? item['id'];
     if (productId == null || productId is! String) continue;
 
-    // Skip if product was deleted (prevents silent fail + NOT_FOUND later)
     final productSnap = await firestore.collection('products').doc(productId).get();
     if (!productSnap.exists) {
-      debugPrint('Buy Again: Skipping deleted product → $productId');
+      debugPrint('Buy Again: Product no longer exists → $productId');
       continue;
     }
 
-    final docRef = cartRef.doc();
-    batch.set(docRef, {
-      'productId': productId,
-      'title': item['name'],
-      'price': (item['price'] ?? 0).toDouble(),
-      'quantity': (item['quantity'] ?? item['qty'] ?? 1) as int,  // ← correct key
-      'imageUrl': item['imageUrl'] ?? '',
-      'addedAt': FieldValue.serverTimestamp(),
+    final data = productSnap.data()!;
+    validItems.add({
+      'id': productId,
+      'name': item['name'] ?? data['name'] ?? 'Product',
+      'price': (data['price'] ?? item['price'] ?? 0).toDouble(),
+      'quantity': (item['quantity'] ?? item['qty'] ?? 1) as int,
+      'imageUrl': item['imageUrl'] ?? data['imageUrl'] ?? '',
     });
-    addedCount++;
   }
 
-  if (addedCount == 0) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No items available (products may have been removed)')),
-      );
-    }
+  if (validItems.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No items available to reorder'), backgroundColor: Colors.orange),
+    );
     return;
   }
 
-  await batch.commit();
-
-  if (mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Added $addedCount item(s) to cart!'), backgroundColor: Colors.green),
-    );
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const cart.CartScreen()));
-  }
+  // INSTANTLY GO TO CHECKOUT — SAME AS NORMAL FLOW
+  if (!mounted) return;
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => CheckoutScreen(selectedItems: validItems),
+    ),
+  );
 }
 
   Future<void> _checkIfReviewed() async {

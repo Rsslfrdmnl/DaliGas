@@ -250,333 +250,420 @@ class _AdminInventoryScreenState extends State<AdminInventoryScreen> {
   }
 
   // === PRODUCT DIALOG WITH LOCATION + GEOHASH ===
-  Future<void> _showProductDialog({DocumentSnapshot? doc}) async {
-    final isEdit = doc != null;
-    String name = doc?.safeGet<String>('name') ?? '';
-    String brand = doc?.safeGet<String>('brand') ?? '';
-    String category = doc?.safeGet<String>('category') ?? '';
-    String description = doc?.safeGet<String>('description') ?? '';
-    String unit = doc?.safeGet<String>('unit') ?? '';
-    double price = doc?.safeGet<num>('price')?.toDouble() ?? 0.0;
-    int stock = doc?.safeGet<num>('stock')?.toInt() ?? 0;
-    bool isAvailable = doc?.safeGet<bool>('isAvailable') ?? true;
-    bool featured = doc?.safeGet<bool>('featured') ?? false;
-    String imageUrl = doc?.safeGet<String>('imageUrl') ?? '';
-    String imagePath = doc?.safeGet<String>('imagePath') ?? '';
+  // === BEAUTIFUL PRODUCT DIALOG (Add & Edit) ===
+Future<void> _showProductDialog({DocumentSnapshot? doc}) async {
+  final isEdit = doc != null;
 
-    // LOCATION FROM GEOPOINT
-    GeoPoint? geoPoint =
-        doc?.safeGet<Map<String, dynamic>>('location')?['geopoint'] as GeoPoint?;
-    double? lat = geoPoint?.latitude;
-    double? lng = geoPoint?.longitude;
-    String locationName =
-        doc?.safeGet<Map<String, dynamic>>('location')?['name'] ?? '';
+  // Controllers & Variables
+  final nameController = TextEditingController(text: doc?.safeGet<String>('name') ?? '');
+  final brandController = TextEditingController(text: doc?.safeGet<String>('brand') ?? '');
+  final categoryController = TextEditingController(text: doc?.safeGet<String>('category') ?? '');
+  final descController = TextEditingController(text: doc?.safeGet<String>('description') ?? '');
+  final unitController = TextEditingController(text: doc?.safeGet<String>('unit') ?? '');
+  final priceController = TextEditingController(
+      text: doc?.safeGet<num>('price')?.toDouble().toStringAsFixed(2) ?? '');
+  final stockController = TextEditingController(
+      text: doc?.safeGet<num>('stock')?.toInt().toString() ?? '');
 
-    XFile? pickedImage;
-    Uint8List? pickedBytes;
-    final _formKey = GlobalKey<FormState>();
+  bool isAvailable = doc?.safeGet<bool>('isAvailable') ?? true;
+  bool featured = doc?.safeGet<bool>('featured') ?? false;
 
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return StatefulBuilder(builder: (context, setStateDialog) {
-          Future<void> pickImage() async {
-            final result = await _pickImageAndPreview();
-            if (result != null) {
-              setStateDialog(() {
-                pickedImage = result['file'] as XFile;
-                pickedBytes = result['bytes'] as Uint8List;
-              });
+  String imageUrl = doc?.safeGet<String>('imageUrl') ?? '';
+  String imagePath = doc?.safeGet<String>('imagePath') ?? '';
+  Uint8List? previewBytes;
+
+  // Location
+  GeoPoint? geoPoint = doc?.safeGet<Map<String, dynamic>>('location')?['geopoint'] as GeoPoint?;
+  double? lat = geoPoint?.latitude;
+  double? lng = geoPoint?.longitude;
+  String locationName = doc?.safeGet<Map<String, dynamic>>('location')?['name'] ?? 'Shop Location';
+
+  final formKey = GlobalKey<FormState>();
+
+  await showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 720,
+        constraints: const BoxConstraints(maxHeight: 800),
+        padding: const EdgeInsets.all(24),
+        child: StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> pickImage() async {
+              final result = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
+              if (result != null) {
+                final bytes = await result.readAsBytes();
+                setDialogState(() {
+                  previewBytes = bytes;
+                });
+              }
             }
-          }
 
-          Future<void> pickLocation() async {
-            final result = await Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => LocationPickerScreen(
-                  // pass both position and address so the picker can show them
-                  initialPosition:
-                      lat != null && lng != null ? LatLng(lat!, lng!) : null,
-                  initialAddress: locationName.isNotEmpty ? locationName : null,
+            Future<void> pickLocation() async {
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => LocationPickerScreen(
+                    initialPosition: lat != null && lng != null ? LatLng(lat!, lng!) : null,
+                    initialAddress: locationName.isNotEmpty ? locationName : null,
+                  ),
                 ),
-              ),
-            );
-            if (result != null && result is Map) {
-              setStateDialog(() {
-                lat = result['lat'] as double;
-                lng = result['lng'] as double;
-                locationName = result['name'] ?? 'Shop Location';
-              });
+              );
+              if (result != null && result is Map<String, dynamic>) {
+                setDialogState(() {
+                  lat = result['lat'];
+                  lng = result['lng'];
+                  locationName = result['name'] ?? 'Shop Location';
+                });
+              }
             }
-          }
 
-          return AlertDialog(
-            title: Text(isEdit ? 'Edit Product' : 'Add Product'),
-            content: SizedBox(
-              width: 620,
-              height: 720,
-              child: SingleChildScrollView(
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+            return Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Image picker...
-                      GestureDetector(
-                        onTap: pickImage,
-                        child: Container(
-                          height: 140,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            color: Colors.grey.shade200,
-                            image: (pickedBytes != null)
-                                ? DecorationImage(
-                                    image: MemoryImage(pickedBytes!),
-                                    fit: BoxFit.contain)
-                                : (imageUrl.isNotEmpty
-                                    ? DecorationImage(
-                                        image: NetworkImage(imageUrl),
-                                        fit: BoxFit.contain)
-                                    : null),
+                      Text(
+                        isEdit ? 'Edit Product' : 'Add New Product',
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 32),
+
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          // Image Picker
+                          Center(
+                            child: GestureDetector(
+                              onTap: pickImage,
+                              child: Container(
+                                height: 200,
+                                width: 200,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: Colors.grey.shade300, width: 2),
+                                  color: Colors.grey.shade100,
+                                  image: previewBytes != null
+                                      ? DecorationImage(
+                                          image: MemoryImage(previewBytes!),
+                                          fit: BoxFit.contain,
+                                        )
+                                      : imageUrl.isNotEmpty
+                                          ? DecorationImage(
+                                              image: NetworkImage(imageUrl),
+                                              fit: BoxFit.contain,
+                                            )
+                                          : null,
+                                ),
+                                child: previewBytes == null && imageUrl.isEmpty
+                                    ? const Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(Icons.add_a_photo, size: 48, color: Colors.grey),
+                                          SizedBox(height: 12),
+                                          Text('Tap to add image',
+                                              style: TextStyle(color: Colors.grey)),
+                                        ],
+                                      )
+                                    : null,
+                              ),
+                            ),
                           ),
-                          child: (pickedBytes == null && imageUrl.isEmpty)
-                              ? const Center(
-                                  child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.image, size: 36),
-                                        SizedBox(height: 6),
-                                        Text('Tap to pick image')
-                                      ]))
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      // Text fields...
-                      TextFormField(
-                          initialValue: name,
-                          decoration:
-                              const InputDecoration(labelText: 'Name'),
-                          validator: (v) =>
-                              (v == null || v.trim().isEmpty) ? 'Required' : null,
-                          onSaved: (v) => name = v!.trim()),
-                      TextFormField(
-                          initialValue: brand,
-                          decoration:
-                              const InputDecoration(labelText: 'Brand'),
-                          onSaved: (v) => brand = v?.trim() ?? ''),
-                      TextFormField(
-                          initialValue: category,
-                          decoration:
-                              const InputDecoration(labelText: 'Category'),
-                          onSaved: (v) => category = v?.trim() ?? ''),
-                      TextFormField(
-                          initialValue: description,
-                          decoration:
-                              const InputDecoration(labelText: 'Description'),
-                          maxLines: 2,
-                          onSaved: (v) => description = v?.trim() ?? ''),
-                      TextFormField(
-                        initialValue:
-                            price != 0.0 ? price.toString() : '',
-                        decoration: const InputDecoration(labelText: 'Price'),
-                        keyboardType:
-                            const TextInputType.numberWithOptions(decimal: true),
-                        validator: (v) => (v == null || v.trim().isEmpty)
-                            ? 'Required'
-                            : (double.tryParse(v) == null
-                                ? 'Invalid'
-                                : null),
-                        onSaved: (v) => price = double.parse(v!.trim()),
-                      ),
-                      TextFormField(
-                        initialValue: stock != 0 ? stock.toString() : '',
-                        decoration:
-                            const InputDecoration(labelText: 'Stock (qty)'),
-                        keyboardType: TextInputType.number,
-                        validator: (v) => (v == null || v.trim().isEmpty)
-                            ? 'Required'
-                            : (int.tryParse(v) == null ? 'Invalid' : null),
-                        onSaved: (v) => stock = int.parse(v!.trim()),
-                      ),
-                      TextFormField(
-                          initialValue: unit,
-                          decoration: const InputDecoration(labelText: 'Unit'),
-                          onSaved: (v) => unit = v?.trim() ?? ''),
-                      const SizedBox(height: 20),
-                      const Text("Shop Location (Required)",
-                          style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      GestureDetector(
-                        onTap: pickLocation,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                                color: lat != null ? Colors.green : Colors.red),
-                            borderRadius: BorderRadius.circular(8),
-                            color: Colors.grey.shade50,
-                          ),
-                          child: Row(
+                          const SizedBox(height: 24),
+
+                          // Two-column layout
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.location_on,
-                                  color: lat != null ? Colors.green : Colors.red),
-                              const SizedBox(width: 8),
+                              // Left Column
                               Expanded(
-                                child: Text(
-                                  lat != null
-                                      ? "$locationName\nLat: ${lat!.toStringAsFixed(5)}, Lng: ${lng!.toStringAsFixed(5)}"
-                                      : "Tap to select shop location on map",
-                                  style: TextStyle(
-                                      color:
-                                          lat != null ? Colors.black : Colors.red),
+                                child: Column(
+                                  children: [
+                                    TextFormField(
+                                      controller: nameController,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Product Name *',
+                                        border: OutlineInputBorder(),
+                                        prefixIcon: Icon(Icons.inventory_2),
+                                      ),
+                                      validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null,
+                                    ),
+                                    const SizedBox(height: 16),
+                                    TextFormField(
+                                      controller: brandController,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Brand',
+                                        border: OutlineInputBorder(),
+                                        prefixIcon: Icon(Icons.branding_watermark),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    TextFormField(
+                                      controller: categoryController,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Category',
+                                        border: OutlineInputBorder(),
+                                        prefixIcon: Icon(Icons.category),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    TextFormField(
+                                      controller: unitController,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Unit (e.g. kg, pcs)',
+                                        border: OutlineInputBorder(),
+                                        prefixIcon: Icon(Icons.straighten),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 24),
+                              // Right Column
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    TextFormField(
+                                      controller: priceController,
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                      decoration: const InputDecoration(
+                                        labelText: 'Price (₱) *',
+                                        border: OutlineInputBorder(),
+                                        prefixIcon: Icon(Icons.attach_money),
+                                      ),
+                                      validator: (v) {
+                                        if (v?.trim().isEmpty ?? true) return 'Required';
+                                        if (double.tryParse(v!) == null) return 'Invalid number';
+                                        return null;
+                                      },
+                                    ),
+                                    const SizedBox(height: 16),
+                                    TextFormField(
+                                      controller: stockController,
+                                      keyboardType: TextInputType.number,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Stock Quantity *',
+                                        border: OutlineInputBorder(),
+                                        prefixIcon: Icon(Icons.inventory),
+                                      ),
+                                      validator: (v) {
+                                        if (v?.trim().isEmpty ?? true) return 'Required';
+                                        if (int.tryParse(v!) == null) return 'Invalid number';
+                                        return null;
+                                      },
+                                    ),
+                                    const SizedBox(height: 16),
+                                    TextFormField(
+                                      controller: descController,
+                                      maxLines: 3,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Description (optional)',
+                                        border: OutlineInputBorder(),
+                                        alignLabelWithHint: true,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
                           ),
+                          const SizedBox(height: 24),
+
+                          // Location Picker Card
+                          Card(
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            child: ListTile(
+                              leading: Icon(
+                                Icons.location_on,
+                                color: lat != null ? Colors.green : Colors.red,
+                              ),
+                              title: Text(
+                                lat != null
+                                    ? locationName
+                                    : 'No location selected',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: lat != null ? Colors.black87 : Colors.red,
+                                ),
+                              ),
+                              subtitle: lat != null
+                                  ? Text('Lat: ${lat!.toStringAsFixed(5)}, Lng: ${lng!.toStringAsFixed(5)}')
+                                  : const Text('Required for delivery range'),
+                              trailing: ElevatedButton.icon(
+                                onPressed: pickLocation,
+                                icon: const Icon(Icons.map, color: Colors.white),
+                                label: const Text("Pick Location", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                              ),
+                            ),
+                          ),
+                          if (lat == null)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 8),
+                              child: Text('Location is required!', style: TextStyle(color: Colors.red)),
+                            ),
+
+                          const SizedBox(height: 20),
+
+                          // Toggles
+                          Row(
+                            children: [
+                              FilterChip(
+                                label: const Text('Available for Sale'),
+                                selected: isAvailable,
+                                onSelected: (v) => setDialogState(() => isAvailable = v),
+                                selectedColor: Colors.green.shade100,
+                                checkmarkColor: Colors.green,
+                              ),
+                              const SizedBox(width: 16),
+                              FilterChip(
+                                label: const Text('Featured Product'),
+                                selected: featured,
+                                onSelected: (v) => setDialogState(() => featured = v),
+                                selectedColor: Colors.orange.shade100,
+                                checkmarkColor: Colors.orange.shade700,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  // Action Buttons
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: _saving ? null : () => Navigator.pop(context),
+                        child: const Text('Cancel', style: TextStyle(fontSize: 16)),
+                      ),
+                      const SizedBox(width: 12),
+                      ElevatedButton(
+                        onPressed: _saving || lat == null
+                            ? null
+                            : () async {
+                                if (!formKey.currentState!.validate()) return;
+
+                                setState(() => _saving = true);
+
+                                try {
+                                  final name = nameController.text.trim();
+                                  final brand = brandController.text.trim();
+                                  final category = categoryController.text.trim();
+                                  final description = descController.text.trim();
+                                  final unit = unitController.text.trim();
+                                  final price = double.parse(priceController.text);
+                                  final stock = int.parse(stockController.text);
+
+                                  final geoPoint = GeoPoint(lat!, lng!);
+                                  final geoFirePoint = GeoFirePoint(geoPoint);
+                                  final locationData = {
+                                    'geopoint': geoPoint,
+                                    'geohash': geoFirePoint.data['geohash'],
+                                    'name': locationName,
+                                  };
+
+                                  String finalImageUrl = imageUrl;
+                                  String finalImagePath = imagePath;
+
+                                  // Upload new image if picked
+                                  if (previewBytes != null) {
+                                    final id = isEdit ? doc!.id : _productsRef.doc().id;
+                                    if (imagePath.isNotEmpty) {
+                                      try {
+                                        await FirebaseStorage.instance.ref(imagePath).delete();
+                                      } catch (_) {}
+                                    }
+                                    final uploadResult = await _uploadImageToStorage(
+                                      picked: XFile.fromData(previewBytes!),
+                                      productId: id,
+                                    );
+                                    if (uploadResult != null) {
+                                      finalImageUrl = uploadResult['url']!;
+                                      finalImagePath = uploadResult['path']!;
+                                    }
+                                  }
+
+                                  final data = {
+                                    'name': name,
+                                    'brand': brand,
+                                    'category': category,
+                                    'description': description,
+                                    'price': price,
+                                    'stock': stock,
+                                    'unit': unit,
+                                    'isAvailable': isAvailable,
+                                    'featured': featured,
+                                    'imageUrl': finalImageUrl,
+                                    'imagePath': finalImagePath,
+                                    'location': locationData,
+                                    'updatedAt': FieldValue.serverTimestamp(),
+                                  };
+
+                                  if (isEdit) {
+                                    await _productsRef.doc(doc!.id).update(data);
+                                    if (stock != (doc.safeGet<num>('stock')?.toInt() ?? 0)) {
+                                      await _productsRef.doc(doc.id).update({'lastRestocked': FieldValue.serverTimestamp()});
+                                    }
+                                  } else {
+                                    final newRef = _productsRef.doc();
+                                    await newRef.set({
+                                      ...data,
+                                      'createdAt': FieldValue.serverTimestamp(),
+                                      'lastRestocked': stock > 0 ? FieldValue.serverTimestamp() : null,
+                                      'rating': 0.0,
+                                      'tags': <String>[],
+                                    });
+                                  }
+
+                                  if (context.mounted) Navigator.pop(context);
+                                } catch (e) {
+                                  debugPrint('Save error: $e');
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Failed to save product')),
+                                  );
+                                } finally {
+                                  setState(() => _saving = false);
+                                }
+                              },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: Text(
+                          isEdit ? 'Save Changes' : 'Add Product',
+                          style: const TextStyle(fontSize: 16, color: Colors.white),
                         ),
                       ),
-                      if (lat == null)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 8),
-                          child: Text("Location is required!",
-                              style:
-                                  TextStyle(color: Colors.red, fontSize: 12)),
-                        ),
-                      const SizedBox(height: 16),
-                      Row(children: [
-                        Checkbox(
-                            value: isAvailable,
-                            onChanged: (val) =>
-                                setStateDialog(() => isAvailable = val ?? true)),
-                        const Text('Available')
-                      ]),
                     ],
                   ),
-                ),
+                ],
               ),
-            ),
-            actions: [
-              TextButton(
-                  onPressed: _saving
-                      ? null
-                      : () => Navigator.of(context).pop(),
-                  child: const Text('Cancel')),
-              ElevatedButton(
-                onPressed: _saving || lat == null
-                    ? null
-                    : () async {
-                        if (!_formKey.currentState!.validate()) return;
-                        _formKey.currentState!.save();
-                        setState(() => _saving = true);
-
-                        try {
-                          // CREATE GEOPOINT + GEOHASH
-                          final geoPoint = GeoPoint(lat!, lng!);
-                          final geoFirePoint = GeoFirePoint(geoPoint);
-                          final locationData = {
-                            'geopoint': geoPoint,
-                            'geohash': geoFirePoint.data['geohash'],
-                            'name': locationName.isEmpty
-                                ? 'Shop Location'
-                                : locationName,
-                          };
-
-                          if (isEdit) {
-                            final id = doc!.id;
-                            if (pickedImage != null) {
-                              if (imagePath.isNotEmpty) {
-                                try {
-                                  await FirebaseStorage.instance
-                                      .ref(imagePath)
-                                      .delete();
-                                } catch (_) {}
-                              }
-                              final res = await _uploadImageToStorage(
-                                  picked: pickedImage!, productId: id);
-                              if (res != null) {
-                                imageUrl = res['url']!;
-                                imagePath = res['path']!;
-                              }
-                            }
-
-                            final updateData = {
-                              'name': name,
-                              'brand': brand,
-                              'category': category,
-                              'description': description,
-                              'price': price,
-                              'stock': stock,
-                              'unit': unit,
-                              'isAvailable': isAvailable,
-                              'featured': featured,
-                              'imageUrl': imageUrl,
-                              'imagePath': imagePath,
-                              'location': locationData,
-                              'updatedAt': FieldValue.serverTimestamp(),
-                            };
-                            if (stock !=
-                                (doc.safeGet<num>('stock')?.toInt() ?? 0)) {
-                              updateData['lastRestocked'] =
-                                  FieldValue.serverTimestamp();
-                            }
-                            await _productsRef.doc(id).update(updateData);
-                          } else {
-                            final newDocRef = _productsRef.doc();
-                            final id = newDocRef.id;
-                            if (pickedImage != null) {
-                              final res = await _uploadImageToStorage(
-                                  picked: pickedImage!, productId: id);
-                              if (res != null) {
-                                imageUrl = res['url']!;
-                                imagePath = res['path']!;
-                              }
-                            }
-
-                            await newDocRef.set({
-                              'name': name,
-                              'brand': brand,
-                              'category': category,
-                              'description': description,
-                              'price': price,
-                              'stock': stock,
-                              'unit': unit,
-                              'isAvailable': isAvailable,
-                              'featured': featured,
-                              'imageUrl': imageUrl,
-                              'imagePath': imagePath,
-                              'location': locationData,
-                              'lastRestocked':
-                                  stock > 0 ? FieldValue.serverTimestamp() : null,
-                              'rating': 0.0,
-                              'tags': [],
-                              'createdAt': FieldValue.serverTimestamp(),
-                              'updatedAt': FieldValue.serverTimestamp(),
-                            });
-                          }
-                          if (context.mounted) Navigator.of(context).pop();
-                        } catch (e) {
-                          debugPrint('Save error: $e');
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text('Error saving product')));
-                          }
-                        } finally {
-                          setState(() => _saving = false);
-                        }
-                      },
-                child: Text(isEdit ? 'Save' : 'Add'),
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
+            );
+          },
+        ),
+      ),
+    ),
+  );
+}
 
   Future<void> _deleteProduct(DocumentSnapshot doc) async {
     final confirm = await showDialog<bool>(

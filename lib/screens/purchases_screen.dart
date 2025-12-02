@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:daligas/services/firebase_functions.dart';
 import 'package:daligas/screens/account_screen.dart';
 import 'package:daligas/screens/cart_screen.dart' as cart;
 import 'package:daligas/screens/help_screen.dart';
@@ -13,6 +14,7 @@ import 'package:daligas/screens/home_screen.dart';
 import 'package:daligas/screens/messages_screen.dart';
 import 'package:daligas/screens/review_order_screen.dart';
 import 'package:daligas/screens/order_details_screen.dart';
+import 'package:daligas/screens/checkout_screen.dart';
 import 'package:daligas/main_mobile.dart';
 
 class PurchasesScreen extends StatefulWidget {
@@ -668,74 +670,47 @@ Future<void> _cancelOrder(BuildContext context, String orderId, List<Map<String,
 
 // BUY AGAIN — PURCHASES SCREEN (FINAL FIXED VERSION)
 Future<void> _buyAgain(BuildContext context, List<Map<String, dynamic>> items) async {
-  final userId = FirebaseAuth.instance.currentUser?.uid;
-  if (userId == null) {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Please log in first')),
+      const SnackBar(content: Text('Please log in first'), backgroundColor: Colors.red),
     );
     return;
   }
 
-  try {
-    final batch = firestore.batch();
-    final cartRef = firestore.collection('cart').doc(userId).collection('items');
+  final List<Map<String, dynamic>> validItems = [];
+  for (final item in items) {
+    final productId = item['productId'] ?? item['id'];
+    if (productId == null || productId is! String) continue;
 
-    int addedCount = 0;
+    final productSnap = await firestore.collection('products').doc(productId).get();
+    if (!productSnap.exists) continue;
 
-    for (final item in items) {
-      final productId = item['productId'] ?? item['id'];
-      if (productId == null || productId is! String) continue;
-
-      // Skip deleted products
-      final productSnap = await firestore.collection('products').doc(productId).get();
-      if (!productSnap.exists) {
-        debugPrint('Buy Again: Skipping deleted product → $productId');
-        continue;
-      }
-
-      final docRef = cartRef.doc();
-      batch.set(docRef, {
-        'productId': productId,
-        'title': item['name'],
-        'price': (item['price'] ?? 0).toDouble(),
-        'quantity': (item['quantity'] ?? item['qty'] ?? 1) as int,  // ← correct key
-        'imageUrl': item['imageUrl'] ?? '',
-        'addedAt': FieldValue.serverTimestamp(),
-      });
-      addedCount++;
-    }
-
-    if (addedCount == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No items available to add (products may have been removed)'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    await batch.commit();
-
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Added $addedCount item(s) to cart!'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const cart.CartScreen()),
-      );
-    }
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to add to cart: $e'), backgroundColor: Colors.red),
-      );
-    }
+    final data = productSnap.data()!;
+    validItems.add({
+      'id': productId,
+      'name': item['name'] ?? data['name'] ?? 'Product',
+      'price': (data['price'] ?? item['price'] ?? 0).toDouble(),
+      'quantity': (item['quantity'] ?? item['qty'] ?? 1) as int,
+      'imageUrl': item['imageUrl'] ?? data['imageUrl'] ?? '',
+    });
   }
+
+  if (validItems.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No items available to reorder'), backgroundColor: Colors.orange),
+    );
+    return;
+  }
+
+  if (!context.mounted) return;
+
+  // GO DIRECTLY TO CHECKOUT — BEST UX
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => CheckoutScreen(selectedItems: validItems),
+    ),
+  );
 }
 }

@@ -357,7 +357,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
         backgroundColor: const Color(0xFF052238),
-        foregroundColor: null,
+        foregroundColor: Colors.white,
         title: const Text('Select Shop Location'),
         actions: [
           if (_loadingLocation)
@@ -427,7 +427,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                     hintText: 'Search places in Philippines...',
                     border: InputBorder.none,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    prefixIcon: const Icon(Icons.search, color: Colors.white),
+                    prefixIcon: const Icon(Icons.search, color: Colors.black),
                     suffixIcon: _searching
                         ? const Padding(
                             padding: EdgeInsets.all(12.0),

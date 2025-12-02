@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform, exit;
+import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -738,6 +739,33 @@ Widget _buildFullOrderDetailsSheet({
   );
 }
 
+  void _fitBothLocationsOnMap() {
+  if (_mapController == null) return;
+
+  final bounds = LatLngBounds(
+    southwest: LatLng(
+      _driverLocation.latitude < _customerLocation.latitude
+          ? _driverLocation.latitude
+          : _customerLocation.latitude,
+      _driverLocation.longitude < _customerLocation.longitude
+          ? _driverLocation.longitude
+          : _customerLocation.longitude,
+    ),
+    northeast: LatLng(
+      _driverLocation.latitude > _customerLocation.latitude
+          ? _driverLocation.latitude
+          : _customerLocation.latitude,
+      _driverLocation.longitude > _customerLocation.longitude
+          ? _driverLocation.longitude
+          : _customerLocation.longitude,
+    ),
+  );
+
+  _mapController!.animateCamera(
+    CameraUpdate.newLatLngBounds(bounds, 100), // 100 = padding
+  );
+}
+
 // Reuse your existing helper methods
 Widget _buildDetailRow(String label, String value, {bool isBold = false, Color? color}) {
   return Padding(
@@ -776,26 +804,46 @@ String _formatTimestamp(Timestamp timestamp) {
 }
 
   Future<void> _loadDriverIconFromFirebase() async {
-    if (_cachedTruckIcon != null) {
+  if (_cachedTruckIcon != null) {
+    if (mounted) {
       setState(() => _isIconLoaded = true);
-      return;
-    }
-    try {
-      final ref = FirebaseStorage.instance.ref().child('icons/truck.png');
-      final url = await ref.getDownloadURL();
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        final codec = await ui.instantiateImageCodec(response.bodyBytes, targetWidth: 150, targetHeight: 150);
-        final frame = await codec.getNextFrame();
-        final byteData = await frame.image.toByteData(format: ui.ImageByteFormat.png);
-        final bitmap = BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
-        _cachedTruckIcon = bitmap;
-        if (mounted) setState(() => _isIconLoaded = true);
+      _updateMarkers(); // ← ADD THIS
+      if (_mapController != null && _driverLocation.latitude != 14.5995 && _customerLocation.latitude != 14.5995) {
+        _fitBothLocationsOnMap();
+        _fetchRoute();
       }
-    } catch (e) {
-      debugPrint('Failed to load truck icon: $e');
     }
+    return;
   }
+
+  try {
+    final ref = FirebaseStorage.instance.ref().child('icons/truck.png');
+    final url = await ref.getDownloadURL();
+    final response = await http.get(Uri.parse(url));
+    if (response.statusCode == 200) {
+      final codec = await ui.instantiateImageCodec(response.bodyBytes, targetWidth: 150, targetHeight: 150);
+      final frame = await codec.getNextFrame();
+      final byteData = await frame.image.toByteData(format: ui.ImageByteFormat.png);
+      final bitmap = BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+      
+      _cachedTruckIcon = bitmap;
+      if (mounted) {
+        setState(() {
+          _isIconLoaded = true;
+        });
+        
+        // CRITICAL: Force update markers and camera once icon is ready
+        _updateMarkers();
+        if (_mapController != null && _driverLocation.latitude != 14.5995 && _customerLocation.latitude != 14.5995) {
+          _fitBothLocationsOnMap();
+          _fetchRoute();
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('Failed to load truck icon: $e');
+  }
+}
 
   void _fetchCustomerPhone() async {
     final doc = await firestore.collection('users').doc(widget.userId).get();
@@ -803,52 +851,71 @@ String _formatTimestamp(Timestamp timestamp) {
   }
 
   void _listenToDriverLocation() {
-    firestore.collection('orders').doc(widget.orderId).snapshots().listen((doc) {
-      if (!doc.exists) return;
-      final data = doc.data()!;
-      final lat = data['driverLocation']?['lat'];
-      final lng = data['driverLocation']?['lng'];
-      if (lat == null || lng == null) return;
+  firestore.collection('orders').doc(widget.orderId).snapshots().listen((doc) {
+    if (!doc.exists) return;
+    final data = doc.data()!;
+    final lat = data['driverLocation']?['lat'];
+    final lng = data['driverLocation']?['lng'];
+    if (lat == null || lng == null) return;
 
-      final newLoc = LatLng(lat as double, lng as double);
-      setState(() {
-        _previousLocation = _driverLocation;
-        _driverLocation = newLoc;
-        _updateMarkers();
-      });
-
-      if (_customerLocation.latitude != 14.5995 &&
-          (_previousLocation == null || _previousLocation!.latitude != newLoc.latitude || _previousLocation!.longitude != newLoc.longitude)) {
-        _fetchRoute();
-      }
-      _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
+    final newLoc = LatLng(lat as double, lng as double);
+    setState(() {
+      _previousLocation = _driverLocation;
+      _driverLocation = newLoc;
     });
-  }
+
+    _updateMarkers(); // ← This now works even if icon was late
+    _fetchRoute();
+    _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
+  });
+}
 
   void _updateMarkers() {
-    double rotation = 0;
-    if (_previousLocation != null) {
-      rotation = Geolocator.bearingBetween(
-        _previousLocation!.latitude,
-        _previousLocation!.longitude,
-        _driverLocation.latitude,
-        _driverLocation.longitude,
-      );
-    }
+  if (!mounted) return;
 
-    _markers = {
-      Marker(markerId: const MarkerId('customer'), position: _customerLocation, icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)),
-      if (_isIconLoaded && _cachedTruckIcon != null)
-        Marker(
+  double rotation = 0;
+  if (_previousLocation != null) {
+    rotation = Geolocator.bearingBetween(
+      _previousLocation!.latitude,
+      _previousLocation!.longitude,
+      _driverLocation.latitude,
+      _driverLocation.longitude,
+    );
+  }
+
+  final driverMarker = _isIconLoaded && _cachedTruckIcon != null
+      ? Marker(
           markerId: const MarkerId('driver'),
           position: _driverLocation,
           icon: _cachedTruckIcon!,
           anchor: const Offset(0.5, 0.5),
           rotation: rotation,
           zIndex: 10,
-        ),
+        )
+      : null;
+
+  setState(() {
+    _markers = {
+      Marker(
+        markerId: const MarkerId('customer'),
+        position: _customerLocation,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      ),
+      if (driverMarker != null) driverMarker,
     };
+  });
+
+  // Force camera update if driver has real location
+  if (_driverLocation.latitude != 14.5995 && _mapController != null) {
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted && _mapController != null) {
+        _mapController!.animateCamera(
+          CameraUpdate.newLatLng(_driverLocation),
+        );
+      }
+    });
   }
+}
 
   void _loadCustomerLocation() async {
     final lat = widget.orderData['customerLatLng']?['lat'];
@@ -1197,19 +1264,49 @@ String _formatTimestamp(Timestamp timestamp) {
                 child: Stack(
                   children: [
                     GoogleMap(
-                      initialCameraPosition: CameraPosition(target: _customerLocation, zoom: 15),
-                      markers: _markers,
-                      polylines: _polylines,
-                      myLocationEnabled: false,
-                      myLocationButtonEnabled: false,
-                      zoomControlsEnabled: false,
-                      onMapCreated: (c) {
-                        _mapController = c;
-                        Future.delayed(const Duration(milliseconds: 500), () {
-                          if (_driverLocation.latitude != 14.5995 && _customerLocation.latitude != 14.5995) _fetchRoute();
-                        });
-                      },
-                    ),
+  initialCameraPosition: CameraPosition(
+    target: _customerLocation.latitude != 14.5995
+        ? _customerLocation
+        : const LatLng(14.5995, 120.9842),
+    zoom: 15,
+  ),
+  markers: _markers,
+  polylines: _polylines,
+  myLocationEnabled: false,
+  myLocationButtonEnabled: false,
+  zoomControlsEnabled: false,
+  mapType: MapType.normal,
+  onMapCreated: (GoogleMapController controller) {
+    _mapController = controller;
+
+    // THE REAL FIX: Rebuild every time the icon finishes loading
+    // This catches the case when icon loads AFTER map is created
+    if (_isIconLoaded && _cachedTruckIcon != null) {
+      _updateMarkers();
+      if (_driverLocation.latitude != 14.5995 && _customerLocation.latitude != 14.5995) {
+        _fitBothLocationsOnMap();
+        _fetchRoute();
+      }
+    }
+
+    // Critical: Rebuild the map whenever icon loads (even if late)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      setState(() {
+        // This forces marker rebuild even if icon just finished loading
+        _updateMarkers();
+
+        if (_driverLocation.latitude != 14.5995 && _customerLocation.latitude != 14.5995) {
+          _fitBothLocationsOnMap();
+          _fetchRoute();
+        } else if (_driverLocation.latitude != 14.5995) {
+          controller.animateCamera(CameraUpdate.newLatLngZoom(_driverLocation, 16));
+        }
+      });
+    });
+  },
+),
                     if (_isRouteLoading) const Center(child: CircularProgressIndicator(color: Colors.white)),
                     if (_routeInfo.isNotEmpty)
                       Positioned(
@@ -1343,30 +1440,112 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
     super.initState();
     _driverLocation = widget.driverLocation;
     _previousLocation = widget.driverLocation;
+
+    // Load icon + force update when ready
     _loadDriverIconFromFirebase();
+
+    // Listen to live location updates
     _listenToDriverLocation();
+
+    // Initial route + bounds when screen opens
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_driverLocation.latitude != 14.5995 && widget.customerLocation.latitude != 14.5995) _fetchRoute();
+      if (mounted) {
+        _updateMarkersAndCamera(); // ← This is the magic
+      }
     });
   }
 
   Future<void> _loadDriverIconFromFirebase() async {
-    if (_cachedTruckIcon != null) { setState(() => _isIconLoaded = true); return; }
+    if (_cachedTruckIcon != null) {
+      if (mounted) {
+        setState(() => _isIconLoaded = true);
+        _updateMarkersAndCamera(); // ← Critical: forces truck to appear
+      }
+      return;
+    }
+
     try {
       final ref = FirebaseStorage.instance.ref().child('icons/truck.png');
       final url = await ref.getDownloadURL();
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
-        final codec = await ui.instantiateImageCodec(response.bodyBytes, targetWidth: 150, targetHeight: 150);
+        final codec = await ui.instantiateImageCodec(response.bodyBytes,
+            targetWidth: 150, targetHeight: 150);
         final frame = await codec.getNextFrame();
         final byteData = await frame.image.toByteData(format: ui.ImageByteFormat.png);
         final bitmap = BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+
         _cachedTruckIcon = bitmap;
-        if (mounted) setState(() => _isIconLoaded = true);
+        if (mounted) {
+          setState(() => _isIconLoaded = true);
+          _updateMarkersAndCamera(); // ← This forces truck + route on first open
+        }
       }
     } catch (e) {
       debugPrint('Truck icon load failed: $e');
     }
+  }
+
+  // NEW: Shared helper — updates markers + fits map + fetches route
+  void _updateMarkersAndCamera() {
+    _updateMarkers();
+    if (_driverLocation.latitude != 14.5995 && widget.customerLocation.latitude != 14.5995) {
+      _fitBothLocationsOnMap();
+      _fetchRoute();
+    }
+  }
+
+  void _fitBothLocationsOnMap() {
+    if (_mapController == null) return;
+
+    final bounds = LatLngBounds(
+      southwest: LatLng(
+        min(_driverLocation.latitude, widget.customerLocation.latitude),
+        min(_driverLocation.longitude, widget.customerLocation.longitude),
+      ),
+      northeast: LatLng(
+        max(_driverLocation.latitude, widget.customerLocation.latitude),
+        max(_driverLocation.longitude, widget.customerLocation.longitude),
+      ),
+    );
+
+    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
+  }
+
+  void _updateMarkers() {
+    if (!mounted) return;
+
+    double rotation = 0;
+    if (_previousLocation != null) {
+      rotation = Geolocator.bearingBetween(
+        _previousLocation!.latitude,
+        _previousLocation!.longitude,
+        _driverLocation.latitude,
+        _driverLocation.longitude,
+      );
+    }
+
+    final driverMarker = (_isIconLoaded && _cachedTruckIcon != null)
+        ? Marker(
+            markerId: const MarkerId('driver'),
+            position: _driverLocation,
+            icon: _cachedTruckIcon!,
+            anchor: const Offset(0.5, 0.5),
+            rotation: rotation,
+            zIndex: 10,
+          )
+        : null;
+
+    setState(() {
+      _markers = {
+        Marker(
+          markerId: const MarkerId('customer'),
+          position: widget.customerLocation,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        ),
+        if (driverMarker != null) driverMarker,
+      };
+    });
   }
 
   void _listenToDriverLocation() {
@@ -1375,29 +1554,17 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
       final data = doc.data()!;
       final lat = data['driverLocation']?['lat'];
       final lng = data['driverLocation']?['lng'];
-      if (lat != null && lng != null) {
-        final newLoc = LatLng(lat as double, lng as double);
-        setState(() {
-          _previousLocation = _driverLocation;
-          _driverLocation = newLoc;
-          _updateMarkers();
-          _fetchRoute();
-        });
-        _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
-      }
-    });
-  }
+      if (lat == null || lng == null) return;
 
-  void _updateMarkers() {
-    double rotation = 0;
-    if (_previousLocation != null) {
-      rotation = Geolocator.bearingBetween(_previousLocation!.latitude, _previousLocation!.longitude, _driverLocation.latitude, _driverLocation.longitude);
-    }
-    _markers = {
-      Marker(markerId: const MarkerId('customer'), position: widget.customerLocation, icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)),
-      if (_isIconLoaded && _cachedTruckIcon != null)
-        Marker(markerId: const MarkerId('driver'), position: _driverLocation, icon: _cachedTruckIcon!, anchor: const Offset(0.5, 0.5), rotation: rotation, zIndex: 10),
-    };
+      final newLoc = LatLng(lat as double, lng as double);
+      setState(() {
+        _previousLocation = _driverLocation;
+        _driverLocation = newLoc;
+      });
+
+      _updateMarkersAndCamera(); // ← Now reacts live + shows truck immediately
+      _mapController?.animateCamera(CameraUpdate.newLatLng(newLoc));
+    });
   }
 
   Future<void> _fetchRoute() async {
@@ -1496,19 +1663,32 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Live Tracking - #${widget.orderId}'), backgroundColor: const Color(0xFF052238), foregroundColor: null),
+      appBar: AppBar(
+        title: Text('Live Tracking - #${widget.orderId}'),
+        backgroundColor: const Color(0xFF052238),
+      ),
       body: Stack(
         children: [
           GoogleMap(
-            initialCameraPosition: CameraPosition(target: widget.customerLocation, zoom: 14),
+            initialCameraPosition: CameraPosition(
+              target: widget.customerLocation.latitude != 14.5995
+                  ? widget.customerLocation
+                  : const LatLng(14.5995, 120.9842),
+              zoom: 15,
+            ),
             markers: _markers,
             polylines: _polylines,
             myLocationEnabled: false,
             myLocationButtonEnabled: true,
             zoomControlsEnabled: true,
-            onMapCreated: (c) => _mapController = c,
+            onMapCreated: (controller) {
+              _mapController = controller;
+              // Force update once map is ready
+              _updateMarkersAndCamera();
+            },
           ),
-          if (_isRouteLoading) const Center(child: CircularProgressIndicator(color: Colors.white)),
+          if (_isRouteLoading)
+            const Center(child: CircularProgressIndicator(color: Colors.white)),
           if (_routeInfo.isNotEmpty)
             Positioned(
               top: MediaQuery.of(context).padding.top + 10,
@@ -1516,14 +1696,24 @@ class _FullScreenMapScreenState extends State<FullScreenMapScreen> {
               right: 16,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10)]),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)],
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.access_time, color: Colors.white, size: 20),
                     const SizedBox(width: 8),
-                    Text(_routeInfo.split('•').first.trim(), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                    Text(' • ${_routeInfo.split('•').last.trim()}', style: const TextStyle(color: Colors.white70, fontSize: 16)),
+                    Text(
+                      _routeInfo.split('•').first.trim(),
+                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      ' • ${_routeInfo.split('•').last.trim()}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 16),
+                    ),
                   ],
                 ),
               ),

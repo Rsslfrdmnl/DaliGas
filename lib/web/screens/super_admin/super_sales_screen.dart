@@ -24,6 +24,7 @@ class _SuperSalesScreenState extends State<SuperSalesScreen> {
   String _searchQuery = '';
   int _currentPage = 0;
   final int _itemsPerPage = 1;
+  final Map<String, String> _userNameCache = {};
 
   Future<void> _logout(BuildContext context) async {
   await FirebaseAuth.instance.signOut();
@@ -145,17 +146,42 @@ class _SuperSalesScreenState extends State<SuperSalesScreen> {
         return const Center(child: CircularProgressIndicator());
       }
 
-      // Filter logic
-      final filtered = snapshot.data!.docs.where((doc) {
+      final allDocs = snapshot.data!.docs;
+
+      // PRE-LOAD ALL USER NAMES IN BACKGROUND (once per stream update)
+      for (var doc in allDocs) {
         final data = doc.data() as Map<String, dynamic>;
-        final orderId = doc.id.toString().toLowerCase();
-        final userId = (data['userId'] as String?)?.toLowerCase() ?? '';
+        final userId = data['userId'] as String?;
+        if (userId != null && !_userNameCache.containsKey(userId)) {
+          // Fire-and-forget: load name and cache it
+          firestore.collection('users').doc(userId).get().then((userSnap) {
+            if (userSnap.exists) {
+              final name = (userSnap.data()?['fullName'] as String?) ?? 'Unknown User';
+              setState(() {
+                _userNameCache[userId] = name;
+              });
+            }
+          });
+        }
+      }
+
+      // NOW filter using the growing cache — works instantly even on page 1
+      final filtered = allDocs.where((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        final orderId = doc.id.toLowerCase();
+        final customerName = ((data['customerName'] as String?) ?? '').trim().toLowerCase();
+
         final items = data['items'] as List<dynamic>? ?? [];
-        final productNames = items.map((i) => (i['name'] as String?)?.toLowerCase() ?? '').join(' ');
-        final searchable = '$orderId $userId $productNames';
+        final productNames = items.map((i) => (i['name'] as String?)?.toLowerCase() ?? '').join(' ').toLowerCase();
+
+        final userId = data['userId'] as String?;
+        final userName = userId != null ? (_userNameCache[userId] ?? '').toLowerCase() : '';
+
+        final searchable = '$orderId $customerName $userName $productNames';
         return _searchQuery.isEmpty || searchable.contains(_searchQuery);
       }).toList();
 
+      // Your beautiful 1-item pagination stays exactly the same
       final totalPages = (filtered.length / _itemsPerPage).ceil();
       final start = _currentPage * _itemsPerPage;
       final end = (start + _itemsPerPage).clamp(0, filtered.length);
@@ -211,15 +237,46 @@ class _SuperSalesScreenState extends State<SuperSalesScreen> {
                                 ? DateFormat('MMM dd, yyyy').format((data['createdAt'] as Timestamp).toDate())
                                 : '-',
                           )),
-                          DataCell(FutureBuilder<DocumentSnapshot>(
-                            future: firestore.collection('users').doc(data['userId']).get(),
-                            builder: (context, snap) {
-                              final name = (!snap.hasData || !snap.data!.exists)
-    ? '...'
-    : (snap.data!.data() as Map<String, dynamic>?)?['fullName'] ?? 'Unknown';
-                              return Text(name);
-                            },
-                          )),
+                          DataCell(
+  Builder(builder: (context) {
+    final String? manualName = data['customerName'] as String?;
+    if (manualName != null && manualName.trim().isNotEmpty) {
+      return Text(manualName.trim(), style: const TextStyle(fontWeight: FontWeight.w500));
+    }
+
+    final String? userId = data['userId'] as String?;
+    if (userId == null || userId.isEmpty) {
+      return const Text('Walk-in Customer', style: TextStyle(color: Colors.orange));
+    }
+
+    // Use cached name if available
+    if (_userNameCache.containsKey(userId)) {
+      return Text(_userNameCache[userId]!, style: const TextStyle(fontWeight: FontWeight.w500));
+    }
+
+    return FutureBuilder<DocumentSnapshot>(
+      key: ValueKey(userId),
+      future: firestore.collection('users').doc(userId).get(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox(width: 80, child: LinearProgressIndicator(minHeight: 3));
+        }
+        if (!snapshot.hasData || !snapshot.data!.exists) {
+          _userNameCache[userId] = 'Unknown User';
+          return const Text('Unknown User', style: TextStyle(color: Colors.red));
+        }
+
+        final userData = snapshot.data!.data() as Map<String, dynamic>;
+        final name = userData['fullName'] as String? ?? 'No Name';
+
+        // Cache it for instant search later
+        _userNameCache[userId] = name;
+
+        return Text(name, style: const TextStyle(fontWeight: FontWeight.w500));
+      },
+    );
+  }),
+),
                           DataCell(Text(firstItem?['name'] ?? '-', style: const TextStyle(fontWeight: FontWeight.w500))),
                           DataCell(Text(firstItem?['quantity']?.toString() ?? '-', textAlign: TextAlign.center)),
                           DataCell(Text(
@@ -502,135 +559,6 @@ class _PaymentPieChart extends StatelessWidget {
 }
 
 // ───── Final Transaction Table – 5 rows, full width, smart paginator ─────
-class _TransactionTable extends StatelessWidget {
-  final String searchQuery;
-  final int currentPage;
-  final ValueChanged<int> onPageChanged;
-  const _TransactionTable({required this.searchQuery, required this.currentPage, required this.onPageChanged});
-
-  static final NumberFormat currency = NumberFormat.currency(locale: 'fil_PH', symbol: '₱');
-  final int rowsPerPage = 5;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 6,
-      child: StreamBuilder<QuerySnapshot>(
-        stream: firestore.collection('orders').orderBy('createdAt', descending: true).snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-          var filtered = snapshot.data!.docs.where((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            final orderId = doc.id.toLowerCase();
-            final userId = (data['userId'] as String?)?.toLowerCase() ?? '';
-            final items = data['items'] as List<dynamic>? ?? [];
-            final searchable = [orderId, userId, ...items.map((i) => (i['name'] as String?)?.toLowerCase() ?? '')].join(' ');
-            return searchQuery.isEmpty || searchable.contains(searchQuery);
-          }).toList();
-
-          final totalPages = (filtered.length / rowsPerPage).ceil();
-          final start = currentPage * rowsPerPage;
-          final pageData = filtered.length > start ? filtered.sublist(start, (start + rowsPerPage).clamp(0, filtered.length)) : <QueryDocumentSnapshot>[];
-
-          return Column(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 1000),
-                    child: DataTable(
-                      headingRowColor: WidgetStateProperty.all(Colors.grey.shade50),
-                      dataRowHeight: 68,
-                      headingRowHeight: 56,
-                      columnSpacing: 24,
-                      columns: const [
-                        DataColumn(label: Text("Transaction ID", style: TextStyle(fontWeight: FontWeight.bold))),
-                        DataColumn(label: Text("Date", style: TextStyle(fontWeight: FontWeight.bold))),
-                        DataColumn(label: Text("Customer", style: TextStyle(fontWeight: FontWeight.bold))),
-                        DataColumn(label: Text("Product", style: TextStyle(fontWeight: FontWeight.bold))),
-                        DataColumn(label: Text("Qty", style: TextStyle(fontWeight: FontWeight.bold))),
-                        DataColumn(label: Text("Amount", style: TextStyle(fontWeight: FontWeight.bold))),
-                        DataColumn(label: Text("Payment", style: TextStyle(fontWeight: FontWeight.bold))),
-                        DataColumn(label: Text("Status", style: TextStyle(fontWeight: FontWeight.bold))),
-                      ],
-                      rows: pageData.map((doc) {
-                        final data = doc.data() as Map<String, dynamic>;
-                        final items = (data['items'] as List?) ?? [];
-                        final firstItem = items.isNotEmpty ? items[0] as Map<String, dynamic> : null;
-                        final status = (data['deliveryStatus'] as String?) ?? 'Unknown';
-
-                        Color statusColor = Colors.grey;
-                        if (status == 'Delivered') statusColor = Colors.green;
-                        else if (status == 'Cancelled') statusColor = Colors.red;
-                        else if (status == 'Processing') statusColor = Colors.orange;
-                        else if (status == 'Shipped') statusColor = Colors.blue;
-
-                        return DataRow(cells: [
-                          DataCell(Text(doc.id, style: const TextStyle(fontWeight: FontWeight.bold))),
-                          DataCell(Text(data['createdAt'] != null ? DateFormat('MMM dd, yyyy').format((data['createdAt'] as Timestamp).toDate()) : '-')),
-                          DataCell(FutureBuilder<DocumentSnapshot>(
-                            future: firestore.collection('users').doc(data['userId'] as String?).get(),
-                            builder: (context, snap) {
-                              if (!snap.hasData || snap.data == null) return const Text('...');
-                              final name = (snap.data!.data() as Map<String, dynamic>?)?['fullName'] ?? 'Unknown User';
-                              return Text(name);
-                            },
-                          )),
-                          DataCell(Text(firstItem?['name'] ?? '-')),
-                          DataCell(Text(firstItem?['quantity']?.toString() ?? '-')),
-                          DataCell(Text(currency.format((data['total'] as num?)?.toDouble() ?? 0))),
-                          DataCell(Text(data['paymentMethod']?.toString() ?? '-')),
-                          DataCell(Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(color: statusColor.withOpacity(0.15), borderRadius: BorderRadius.circular(20)),
-                            child: Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold)),
-                          )),
-                        ]);
-                      }).toList(),
-                    ),
-                  ),
-                ),
-              ),
-
-              // Clean Paginator – Max 5 pages shown
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: Colors.grey[50], borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8))),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    IconButton(onPressed: currentPage > 0 ? () => onPageChanged(currentPage - 1) : null, icon: const Icon(Icons.chevron_left)),
-                    ...List.generate(
-                      totalPages.clamp(0, 5),
-                      (i) => Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: InkWell(
-                          onTap: () => onPageChanged(i),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: i == currentPage ? Colors.blue.shade600 : Colors.transparent,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text("${i + 1}", style: TextStyle(color: i == currentPage ? Colors.white : Colors.black87, fontWeight: FontWeight.bold)),
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (totalPages > 5) const Text(" ... "),
-                    IconButton(onPressed: currentPage < totalPages - 1 ? () => onPageChanged(currentPage + 1) : null, icon: const Icon(Icons.chevron_right)),
-                  ],
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
 
 // Sidebar Item (unchanged)
 class _SidebarItem extends StatefulWidget {

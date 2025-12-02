@@ -147,79 +147,164 @@ export const sendNotification = onCall({ region: REGION, database: "daligas" }, 
 });
 
 /* -------------------------------------------------------
-   createOrder — COD & GCash Flow
+   createOrder — COD & GCash Flow (Now supports Manual Orders)
 ---------------------------------------------------------- */
-export const createOrder = onCall({ region: REGION, database: "daligas"}, async (request) => {
-  const { userId, items, paymentMethod, deliveryAddress } = request.data;
-  if (!userId || !items?.length) throw new HttpsError("invalid-argument", "Missing details.");
-  if (!request.auth) throw new HttpsError("unauthenticated", "Login required.");
+export const createOrder = onCall({ region: REGION, database: "daligas" }, async (request) => {
+  const {
+    userId,                    // Optional for manual orders
+    items,
+    paymentMethod,
+    deliveryAddress,
+    customerName,              // ← NEW: for manual orders
+    customerPhone,             // ← NEW: optional
+    isManualOrder = false      // ← NEW: flag to detect admin manual order
+  } = request.data;
+
+  // Validation
+  if (!items?.length) throw new HttpsError("invalid-argument", "Missing items.");
+  if (!deliveryAddress || deliveryAddress.trim() === "") {
+    throw new HttpsError("invalid-argument", "Delivery address is required.");
+  }
 
   const normalizedMethod = (paymentMethod || 'cod').toLowerCase();
   const isCOD = normalizedMethod === 'cod';
 
+  let finalUserId = userId;
+  let finalCustomerName = customerName?.trim() || "Guest Customer";
+  let finalCustomerPhone = customerPhone?.trim() || null;
+
   try {
+    // ——— CASE 1: Regular User Order ———
+    if (!isManualOrder) {
+      if (!request.auth) throw new HttpsError("unauthenticated", "Login required.");
+      if (!userId) throw new HttpsError("invalid-argument", "userId is required for regular orders.");
+      finalUserId = request.auth.uid;
+
+      // Fetch user's name if not provided
+      if (!customerName) {
+        const userDoc = await db.collection("users").doc(finalUserId).get();
+        if (userDoc.exists) {
+          finalCustomerName = userDoc.data()?.fullName || "Unknown User";
+        }
+      }
+    }
+    // ——— CASE 2: Manual Order by Admin ———
+    else {
+      // Allow unauthenticated calls (admin panel uses service account)
+      // No userId required → we don't save it
+      finalUserId = null;
+
+      if (!customerName || customerName.trim() === "") {
+        throw new HttpsError("invalid-argument", "customerName is required for manual orders.");
+      }
+    }
+
     const chosenEmployeeId = await assignEmployee();
     if (!chosenEmployeeId) throw new HttpsError("failed-precondition", "No employees available.");
 
     const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
     const orderRef = db.collection("orders").doc();
 
+    // Process items: ensure imageUrl is preserved
+    const processedItems = items.map(item => ({
+      productId: item.productId,
+      name: item.name,
+      price: item.price,
+      quantity: item.quantity,
+      imageUrl: item.imageUrl || "",   // ← Preserve image URL
+    }));
+
     await orderRef.set({
       orderId: orderRef.id,
-      userId,
+      userId: finalUserId,                    // ← null for manual orders
       employeeId: chosenEmployeeId,
-      items,
-      total,
+      items: processedItems,
+      total: Number(total.toFixed(2)),
       paymentMethod: normalizedMethod,
       paymentStatus: isCOD ? 'Pending' : 'Paid',
       deliveryStatus: "Processing",
       deliveryAddress,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
+
+      // ——— NEW FIELDS (safe for all orders) ———
+      customerName: finalCustomerName,
+      customerPhone: finalCustomerPhone || null,
+      isManualOrder: !!isManualOrder,         // ← Flag for filtering/reporting
     });
 
-    await Promise.all(items.map(async (item) => {
-      const productRef = db.collection("products").doc(item.productId);
-      return db.runTransaction(async (t) => {
+    // Reduce stock safely — SKIP deleted or invalid products
+await Promise.all(
+  items.map(async (item) => {
+    const productId = item.productId || item.id;
+    
+    // Critical: skip if productId is missing, null, undefined, or empty
+    if (!productId || typeof productId !== "string" || productId.trim() === "") {
+      logger.warn("Skipping stock deduction - invalid productId:", item);
+      return;
+    }
+
+    const productRef = db.collection("products").doc(productId);
+
+    try {
+      await db.runTransaction(async (t) => {
         const doc = await t.get(productRef);
-        if (!doc.exists) return;
+        if (!doc.exists) {
+          logger.info(`Product ${productId} no longer exists — skipping stock deduction`);
+          return;
+        }
         const currentStock = doc.data()?.stock || 0;
-        const newStock = Math.max(currentStock - item.quantity, 0);
+        const deductQty = Number(item.quantity) || 1;
+        const newStock = Math.max(currentStock - deductQty, 0);
         t.update(productRef, { stock: newStock });
       });
-    }));
+    } catch (err) {
+      logger.warn(`Failed to deduct stock for product ${productId}:`, err.message);
+      // Don't crash the whole order — just log and continue
+    }
+  })
+);
 
-    const firstProductName = items[0]?.name || "your item";
+    const firstProductName = processedItems[0]?.name || "your item";
     const shortOrderId = orderRef.id.substring(0, 8);
     const messageId = `order_${orderRef.id}`;
 
-    const chatId = `${userId}_${chosenEmployeeId}_${orderRef.id}`;
-    await db.collection("chats").doc(chatId).set({
-      customerId: userId,
-      employeeId: chosenEmployeeId,
-      orderId: orderRef.id,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      deletedByCustomer: false,
-      deletedByEmployee: false,
-    }, { merge: true });
+    // Create chat only if there's a real user (skip for manual orders if no userId)
+    if (finalUserId) {
+      const chatId = `${finalUserId}_${chosenEmployeeId}_${orderRef.id}`;
+      await db.collection("chats").doc(chatId).set({
+        customerId: finalUserId,
+        employeeId: chosenEmployeeId,
+        orderId: orderRef.id,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        deletedByCustomer: false,
+        deletedByEmployee: false,
+      }, { merge: true });
 
-    await db.collection("chats").doc(chatId).collection("metadata").doc("info").set({
-      userId, employeeId: chosenEmployeeId, orderId: orderRef.id,
-    });
-
-    const userDoc = await db.collection("users").doc(userId).get();
-    const userFcmToken = userDoc.data()?.fcmToken;
-    if (userFcmToken) {
-      await safeSendFCM({
-        token: userFcmToken,
-        notification: {
-          title: "Order Placed!",
-          body: `"${firstProductName}" • Order #${shortOrderId} • ${isCOD ? 'COD' : 'Paid via GCash'}`
-        },
-        data: { type: "order", orderId: orderRef.id, messageId, click_action: "FLUTTER_NOTIFICATION_CLICK" },
-        android: { priority: "high", notification: { channelId: "daligas_channel" } },
-      }, userId);
+      await db.collection("chats").doc(chatId).collection("metadata").doc("info").set({
+        userId: finalUserId,
+        employeeId: chosenEmployeeId,
+        orderId: orderRef.id,
+      });
     }
 
+    // Send FCM to customer (only if userId exists and has token)
+    if (finalUserId) {
+      const userDoc = await db.collection("users").doc(finalUserId).get();
+      const userFcmToken = userDoc.data()?.fcmToken;
+      if (userFcmToken) {
+        await safeSendFCM({
+          token: userFcmToken,
+          notification: {
+            title: "Order Placed!",
+            body: `"${firstProductName}" • Order #${shortOrderId} • ${isCOD ? 'COD' : 'Paid via GCash'}`
+          },
+          data: { type: "order", orderId: orderRef.id, messageId, click_action: "FLUTTER_NOTIFICATION_CLICK" },
+          android: { priority: "high", notification: { channelId: "daligas_channel" } },
+        }, finalUserId);
+      }
+    }
+
+    // Always notify the assigned employee
     const empDoc = await db.collection("employees").doc(chosenEmployeeId).get();
     const empFcmToken = empDoc.data()?.fcmToken;
     if (empFcmToken) {
@@ -235,6 +320,7 @@ export const createOrder = onCall({ region: REGION, database: "daligas"}, async 
     }
 
     return { success: true, orderId: orderRef.id };
+
   } catch (error) {
     logger.error("createOrder failed:", error);
     throw new HttpsError("internal", `Failed: ${error.message}`);

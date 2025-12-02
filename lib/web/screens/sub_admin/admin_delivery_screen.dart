@@ -69,9 +69,9 @@ class _AdminDeliveryScreenState extends State<AdminDeliveryScreen> {
       final total = (data['total'] ?? 0).toDouble();
       final paymentMethod = data['paymentMethod'] ?? 'COD';
 
-      final customerName = userId != null
-          ? (users[userId]?['fullName'] as String?) ?? 'Unknown Customer'
-          : 'Unknown Customer';
+      final customerName = userId != null && users.containsKey(userId)
+        ? (users[userId]?['fullName'] as String?) ?? 'Unknown Customer'
+        : (data['customerName'] as String?) ?? 'Walk-in Customer';
 
       final driverName = employeeId != null
           ? (employees[employeeId]?['name'] as String?) ?? 'Unknown Driver'
@@ -388,21 +388,29 @@ String _simpleCsvConvert(List<List<String>> rows) {
                                         final userId = data['userId'] as String?;
                                         final address = (data['deliveryAddress'] ?? '').toString().toLowerCase();
                                         final orderId = doc.id.toLowerCase();
-
+                                      
+                                        // === CORRECT CUSTOMER NAME LOGIC (supports walk-ins) ===
+                                        final String customerName;
+                                        if ((data['customerName'] as String?)?.trim().isNotEmpty == true) {
+                                          customerName = data['customerName'] as String;
+                                        } else if (userId != null && users.containsKey(userId)) {
+                                          customerName = (users[userId]?['fullName'] as String?) ?? 'Unknown Customer';
+                                        } else {
+                                          customerName = 'Walk-in Customer';
+                                        }
+                                      
                                         final employeeName = employeeId != null
                                             ? (employees[employeeId]?['name'] ?? '').toString().toLowerCase()
                                             : '';
-                                        final customerName = userId != null
-                                            ? (users[userId]?['fullName'] ?? '').toString().toLowerCase()
-                                            : '';
-
+                                        final customerNameLower = customerName.toLowerCase();
+                                      
                                         final matchesStatus = selectedStatus == 'All' || status == selectedStatus;
                                         final matchesSearch = searchQuery.isEmpty ||
                                             orderId.contains(searchQuery) ||
                                             employeeName.contains(searchQuery) ||
-                                            customerName.contains(searchQuery) ||
+                                            customerNameLower.contains(searchQuery) ||
                                             address.contains(searchQuery);
-
+                                      
                                         return matchesStatus && matchesSearch;
                                       }).toList();
 
@@ -450,9 +458,13 @@ String _simpleCsvConvert(List<List<String>> rows) {
                                                         ? (employees[employeeId]?['name'] as String?) ?? 'Unknown Driver'
                                                         : 'Not Assigned';
 
-                                                    final customerName = userId != null
-                                                        ? (users[userId]?['fullName'] as String?) ?? 'Unknown Customer'
-                                                        : 'Unknown Customer';
+                                                    final customerName = (data['customerName'] as String?)?.isNotEmpty == true
+                                                        ? (data['customerName'] as String)
+                                                        : userId != null && users.containsKey(userId)
+                                                            ? (users[userId]?['fullName'] as String?) ?? 'Unknown Customer'
+                                                            : 'Walk-in Customer';
+
+                                                    final customerNameLower = customerName.toLowerCase();
 
                                                     return DataRow(cells: [
                                                       DataCell(Text(DateFormat('MMMM d, yyyy – hh:mm a').format(createdAt))),

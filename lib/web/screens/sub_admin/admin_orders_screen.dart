@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:uuid/uuid.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:daligas/web/screens/super_admin/admin_welcome_screen.dart';
@@ -29,6 +31,208 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
   int currentPage = 0;
   final int itemsPerPage = 6;
   final TextEditingController searchController = TextEditingController();
+  final TextEditingController _customerNameController = TextEditingController();
+  final TextEditingController _customerPhoneController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController();
+  String _selectedPaymentMethod = 'cod';
+  final List<Map<String, dynamic>> _manualCart = [];
+
+  void _showManualOrderDialog() {
+    _customerNameController.clear();
+    _customerPhoneController.clear();
+    _addressController.clear();
+    _selectedPaymentMethod = 'cod';
+    _manualCart.clear();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text("Walk In Order"),
+          content: SizedBox(
+            width: 600,
+            height: 680,
+            child: Column(
+              children: [
+                // Customer Info
+                TextField(
+                  controller: _customerNameController,
+                  decoration: const InputDecoration(
+                    labelText: "Customer Name",
+                    prefixIcon: Icon(Icons.person),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _customerPhoneController,
+                  decoration: const InputDecoration(
+                    labelText: "Phone (optional)",
+                    prefixIcon: Icon(Icons.phone),
+                  ),
+                  keyboardType: TextInputType.phone,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _addressController,
+                  decoration: const InputDecoration(
+                    labelText: "Delivery Address",
+                    prefixIcon: Icon(Icons.location_on),
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 16),
+
+                // Payment Method
+                DropdownButtonFormField<String>(
+                  value: _selectedPaymentMethod,
+                  decoration: const InputDecoration(labelText: "Payment Method"),
+                  items: const [
+                    DropdownMenuItem(value: 'cod', child: Text("Cash on Delivery")),
+                    DropdownMenuItem(value: 'gcash', child: Text("GCash (Paid)")),
+                  ],
+                  onChanged: (v) => setDialogState(() => _selectedPaymentMethod = v!),
+                ),
+                const SizedBox(height: 20),
+
+                // Products List
+                const Text("Add Products", style: TextStyle(fontWeight: FontWeight.bold)),
+                const Divider(),
+                Expanded(
+                  child: StreamBuilder<QuerySnapshot>(
+                    stream: firestore.collection('products').where('isAvailable', isEqualTo: true).snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+                      final products = snapshot.data!.docs;
+                      return ListView.builder(
+                        itemCount: products.length,
+                        itemBuilder: (context, i) {
+                          final doc = products[i];
+                          final data = doc.data() as Map<String, dynamic>;
+                          final name = data['name'] ?? 'No Name';
+                          final price = (data['price'] ?? 0).toDouble();
+                          final stock = data['stock'] ?? 0;
+                          final imageUrl = data['imageUrl'] ?? '';
+
+                          final existing = _manualCart.cast<Map<String, dynamic>?>().firstWhere(
+                            (e) => e?['productId'] == doc.id,
+                            orElse: () => null,
+                          );
+
+                          return Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(
+                                children: [
+                                  if (imageUrl.isNotEmpty)
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.network(imageUrl, width: 60, height: 60, fit: BoxFit.contain),
+                                    ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                        Text("₱${price.toStringAsFixed(2)} • Stock: $stock"),
+                                      ],
+                                    ),
+                                  ),
+                                  if (existing != null) ...[
+                                    Row(
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.remove_circle, color: Colors.red),
+                                          onPressed: stock > 0
+                                              ? () => setDialogState(() {
+                                                    existing['quantity']--;
+                                                    if (existing['quantity'] <= 0) _manualCart.remove(existing);
+                                                  })
+                                              : null,
+                                        ),
+                                        Text("${existing['quantity']}", style: const TextStyle(fontSize: 18)),
+                                        IconButton(
+                                          icon: const Icon(Icons.add_circle, color: Colors.green),
+                                          onPressed: stock > existing['quantity']
+                                              ? () => setDialogState(() => existing['quantity']++)
+                                              : null,
+                                        ),
+                                      ],
+                                    ),
+                                  ] else
+                                    ElevatedButton(
+                                      onPressed: stock > 0
+                                          ? () => setDialogState(() {
+                                                _manualCart.add({
+                                                  'productId': doc.id,
+                                                  'name': name,
+                                                  'price': price,
+                                                  'quantity': 1,
+                                                  'imageUrl': imageUrl,
+                                                });
+                                              })
+                                          : null,
+                                      child: const Text(
+                                        "Add",
+                                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+
+                // Cart Summary
+                if (_manualCart.isNotEmpty) ...[
+                  const Divider(),
+                  ..._manualCart.map((item) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text("${item['name']} × ${item['quantity']}"),
+                            Text("₱${(item['price'] * item['quantity']).toStringAsFixed(2)}"),
+                          ],
+                        ),
+                      )),
+                  const Divider(),
+                  Text(
+                    "Total: ₱${_manualCart.fold(0.0, (sum, i) => sum + i['price'] * i['quantity']).toStringAsFixed(2)}",
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: _manualCart.isEmpty ||
+                      _customerNameController.text.trim().isEmpty ||
+                      _addressController.text.trim().isEmpty
+                  ? null
+                  : () async {
+                      Navigator.pop(ctx);
+                      await _createManualOrder();
+                    },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: const Text("Create Order"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   void _exportToCsv() async {
   try {
@@ -109,6 +313,48 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
   }
 
   Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+}
+
+Future<void> _createManualOrder() async {
+
+    final items = _manualCart.map((i) => {
+          'productId': i['productId'],
+          'name': i['name'],
+          'price': i['price'],
+          'quantity': i['quantity'],
+          'imageUrl': i['imageUrl'] ?? '',
+        }).toList();
+
+    try {
+    final functions = FirebaseFunctions.instanceFor(region: 'asia-southeast1');
+    final result = await functions.httpsCallable('createOrder').call({
+      // 'userId': userId,                     // ← REMOVE THIS LINE
+      'items': items,
+      'paymentMethod': _selectedPaymentMethod,
+      'deliveryAddress': _addressController.text.trim(),
+      // Directly pass customer info for manual orders
+      'customerName': _customerNameController.text.trim(),
+      'customerPhone': _customerPhoneController.text.trim().isNotEmpty
+          ? _customerPhoneController.text.trim()
+          : null,
+      // Optional flag so your Cloud Function knows it's a manual order
+      'isManualOrder': true,
+    });
+
+      if (result.data['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Manual order created! #${result.data['orderId'].toString().substring(0, 8)}"),
+          backgroundColor: Colors.green,
+        ),
+      );
+      setState(() {}); // refresh list
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Failed to create order: $e"), backgroundColor: Colors.red),
+    );
+  }
 }
 
   // Your original sidebar – 100% unchanged
@@ -282,19 +528,43 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Row(
-        children: [
-          _buildSidebar(context),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 50, 24, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("Orders", style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 20),
+Widget build(BuildContext context) {
+  return Scaffold(
+    // Remove floatingActionButton completely
+    // We'll place the button inside the layout instead
+
+    body: Row(
+      children: [
+        _buildSidebar(context),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 50, 24, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header Row: Title + Create Manual Order Button (Top Right)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      "Orders",
+                      style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+                    ),
+                    // Green "Create Manual Order" button – now in top-right
+                    FloatingActionButton.extended(
+                      onPressed: _showManualOrderDialog,
+                      backgroundColor: Colors.green,
+                      icon: const Icon(Icons.add_shopping_cart, color: Colors.white),
+                      label: const Text(
+                        "Walk In Order",
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                      elevation: 6,
+                      heroTag: "createManualOrder", // avoids conflict if you add more FABs later
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
 
                   // Live Stats – same as before
                   StreamBuilder<QuerySnapshot>(
@@ -494,17 +764,38 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
                                                   cells: [
                                                     DataCell(Text(DateFormat('MMMM d, yyyy - hh:mm a').format(createdAt))),
                                                     DataCell(
-                                                      userId == null || userId.isEmpty
-                                                          ? const Text("Unknown User")
-                                                          : FutureBuilder<DocumentSnapshot>(
-                                                              future: firestore.collection('users').doc(userId).get(),
-                                                              builder: (context, snap) {
-                                                                if (!snap.hasData) return const Text("...");
-                                                                final name = (snap.data!.data() as Map<String, dynamic>?)?['fullName']?.toString() ?? 'Unknown';
-                                                                return Text(name);
-                                                              },
-                                                            ),
-                                                    ),
+  FutureBuilder<String>(
+    future: () async {
+      final data = doc.data() as Map<String, dynamic>;
+
+      // 1. Prefer manually entered name (from manual orders)
+      if (data.containsKey('customerName') && 
+          data['customerName'] != null && 
+          data['customerName'].toString().trim().isNotEmpty) {
+        return data['customerName'].toString().trim();
+      }
+
+      // 2. Fallback: if there's a userId, fetch from users collection
+      final userId = data['userId'] as String?;
+      if (userId != null && userId.isNotEmpty) {
+        try {
+          final userDoc = await firestore.collection('users').doc(userId).get();
+          if (userDoc.exists) {
+            return (userDoc.data()?['fullName']?.toString() ?? 'Unknown User');
+          }
+        } catch (_) {}
+      }
+
+      return 'Guest / Manual Order';
+    }(),
+    builder: (context, snapshot) {
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return const Text("...");
+      }
+      return Text(snapshot.data ?? 'Unknown');
+    },
+  ),
+),
                                                     DataCell(
                                                       MouseRegion(
                                                         cursor: SystemMouseCursors.click, // Ensures click cursor on hover
