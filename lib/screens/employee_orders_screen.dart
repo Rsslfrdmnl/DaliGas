@@ -509,10 +509,10 @@ String _formatTimestamp(Timestamp timestamp) {
             }
 
             final orders = snapshot.data!.docs.map((doc) {
-              final data = doc.data()! as Map<String, dynamic>;
-              data['id'] = doc.id;
-              return data;
-            }).toList();
+                final data = doc.data()! as Map<String, dynamic>;
+                data['id'] = doc.id;
+                return data;
+              }).where((order) => order['isManualOrder'] != true).toList();
 
             final pending = orders.where((o) => o['deliveryStatus'] == 'Processing' || o['deliveryStatus'] == 'Shipped').toList();
             final completed = orders.where((o) => o['deliveryStatus'] == 'Delivered').toList();

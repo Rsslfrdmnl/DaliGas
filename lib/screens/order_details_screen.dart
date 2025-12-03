@@ -852,9 +852,7 @@ Future<void> _buyAgain() async {
             ]),
             const SizedBox(height: 16),
             const Text('Delivery Info', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 16),
-            const Text('Delivery Info', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
+            const SizedBox(height: 16),
             _infoRow('Address', address),
             _infoRow('Payment', () {
               final paymentStatus = widget.orderData['paymentStatus']?.toString() ?? 'Pending';

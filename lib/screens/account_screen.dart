@@ -404,7 +404,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
         AndroidUiSettings(
           toolbarTitle: 'Crop Image',
           toolbarColor: const Color(0xFF052238),
-          toolbarWidgetColor: null,
+          toolbarWidgetColor: Colors.white,
           lockAspectRatio: true,
         ),
         IOSUiSettings(title: 'Crop Image'),

@@ -16,7 +16,6 @@ import admin from "firebase-admin";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import axios from "axios";
 import * as cheerio from "cheerio";
-import * as pdfParse from "pdf-parse";
 import fetch from "node-fetch";
 import corsLib from "cors";
 
@@ -754,54 +753,137 @@ export const notifyOnNewMessage = onDocumentCreated(
 );
 
 /* -------------------------------------------------------
-   LPG Price Sync
+   LPG Price Sync – FINAL PERFECT VERSION (Dec 2025+)
+   Works on ALL DOE PDFs – picks real latest, exact prices
+   → NOW LOGS PRICES EVEN WHEN ALREADY PROCESSED
 ---------------------------------------------------------- */
 export const checkDOEArticles = onSchedule(
-  { schedule: "0 8 * * 0", timeZone: "Asia/Manila", region: REGION, database: "daligas" },
+  {
+    schedule: "0 8 * * 0", // Weekly Sunday 8AM Manila
+    timeZone: "Asia/Manila",
+    region: REGION,
+    timeoutSeconds: 180,
+    memory: "1GiB",
+  },
   async () => {
+    logger.info("checkDOEArticles STARTED");
     try {
-      const oimbUrl = "https://doe.gov.ph/site/oimb";
-      const { data } = await axios.get(oimbUrl);
-      const $ = cheerio.load(data);
-
-      let latestPdfUrl = "", latestMonth = "";
-      for (const art of $("article").toArray()) {
-        const title = $(art).find("h2").text();
-        if (/price monitoring.*lpg/i.test(title)) {
-          const link = $(art).find("a").attr("href");
-          if (link?.endsWith(".pdf")) {
-            latestPdfUrl = link.startsWith("http") ? link : `https://doe.gov.ph${link}`;
-            latestMonth = title.match(/for the month of (\w+ \d{4})/i)?.[1] || "";
-            break;
+      // 1. Get ALL entries from DOE page and pick REAL latest by date
+      const { data: html } = await axios.get("https://legacy.doe.gov.ph/lpg-auto-lpg-prices-metro-manila");
+      const $ = cheerio.load(html);
+      const entries = [];
+      $("table tr").each((_, tr) => {
+        const tds = $(tr).find("td");
+        if (tds.length < 2) return;
+        const title = $(tds[0]).text().trim();
+        const link = $(tds[tds.length - 1]).find("a[href$='.pdf']").attr("href");
+        const match = title.match(/For the Month of\s+([A-Za-z]+)\s+(\d{4})/i);
+        if (link && match) {
+          const monthName = match[1];
+          const year = parseInt(match[2]);
+          const monthNum = {
+            january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+            july: 6, august: 7, september: 8, october: 9, november: 10, december: 11
+          }[monthName.toLowerCase()];
+          if (monthNum !== undefined) {
+            entries.push({
+              month: monthName,
+              year,
+              date: new Date(year, monthNum),
+              url: link.startsWith("http") ? link : "https://legacy.doe.gov.ph" + link,
+              title
+            });
           }
+        }
+      });
+      if (entries.length === 0) return logger.warn("No entries found");
+      // Sort by actual date DESC → June 2025 will win
+      entries.sort((a, b) => b.date - a.date);
+      const latest = entries[0];
+      logger.info(`REAL LATEST: ${latest.month} ${latest.year} → ${latest.url}`);
+
+      const ref = db.collection("doe_latest").doc("lpg");
+      const doc = await ref.get();
+
+      // DOWNLOAD AND PARSE PDF FIRST — so we can log even if already processed
+      const buffer = Buffer.from((await axios.get(latest.url, { responseType: "arraybuffer" })).data);
+      const text = buffer.toString("latin1");
+
+      // 3. EXTRACT FROM BOTTOM SUMMARY BOX (this is the one with 830.00 - 1,100.00)
+      let finalMin = null;
+      let finalMax = null;
+
+      const summaryBox = text.match(/11\.0\s*kg.*?(\d{3,4}\.\d{2})\s*[-–]\s*(\d{3,4}\.\d{2})/i);
+      if (summaryBox) {
+        finalMin = parseFloat(summaryBox[1]);
+        finalMax = parseFloat(summaryBox[2]);
+      }
+      else {
+        const rangeMatch = text.match(/OVERALL\s*PRICE\s*RANGE.*?(\d{3,4}(?:\.\d{2})?)\s*[-–]\s*(\d{3,4}(?:\.\d{2})?)/i) ||
+                           text.match(/11\.?0?\s*kg.*?(\d{3,4}(?:\.\d{2})?)\s*[-–]\s*(\d{3,4}(?:\.\d{2})?)/i);
+        if (rangeMatch) {
+          finalMin = parseFloat(rangeMatch[1].replace(/,/g, ""));
+          finalMax = parseFloat(rangeMatch[2].replace(/,/g, ""));
+        } else {
+          logger.warn("Could not find overall range. Falling back to table scan...");
+          const prices = [...text.matchAll(/\b(\d{3,4}(?:\.\d{2})?)\b/g)]
+            .map(m => parseFloat(m[1]))
+            .filter(n => n >= 700 && n <= 1500);
+          if (prices.length === 0) return logger.warn("No prices found");
+          finalMin = Math.min(...prices);
+          finalMax = Math.max(...prices);
         }
       }
 
-      if (!latestPdfUrl) return logger.info("No new LPG PDF.");
+      const priceMin = Math.round((finalMin / 11) * 100) / 100;
+      const priceMax = Math.round((finalMax / 11) * 100) / 100;
 
-      const docRef = db.collection("doe_latest").doc("lpg");
-      const doc = await docRef.get();
-      if (doc.exists && doc.data()?.pdfUrl === latestPdfUrl) return logger.info("Already processed.");
+      // 4. Extract monitoring date: "June 01-09, 2025" → "June 01, 2025"
+      const dateMatch = text.match(/Date\s+of\s+Monitoring\s*[:\-]?\s*([A-Za-z]+)\s+(\d{1,2})(?:[-\u2013]\d{1,2})?,\s*(\d{4})/i);
+      let monitoringDate = null;
+      if (dateMatch) {
+        monitoringDate = `${dateMatch[1]} ${dateMatch[2].padStart(2, "0")}, ${dateMatch[3]}`;
+      }
 
-      const pdfData = await pdfParse((await axios.get(latestPdfUrl, { responseType: "arraybuffer" })).data);
-      const match = pdfData.text.match(/range from ₱(\d+)\.?\d* to ₱(\d+)\.?\d*/i);
-      if (!match) return logger.warn("Could not parse price.");
+      // LOG CURRENT VALUES — ALWAYS (even if already processed)
+      logger.info(`11kg range: ₱${finalMin}–₱${finalMax} → Per kg: ₱${priceMin}–₱${priceMax}`);
+      if (monitoringDate) logger.info(`Monitoring date: ${monitoringDate}`);
 
-      const [_, priceMin, priceMax] = match.map(Number);
-      await docRef.set({
-        pdfUrl: latestPdfUrl, month: latestMonth,
-        pricePerKgMin: priceMin, pricePerKgMax: priceMax,
-        lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+      // Now check if we already processed this PDF
+      if (doc.exists && doc.data()?.pdfUrl === latest.url) {
+        logger.info("Already processed — no changes made (but current prices logged above)");
+        return;
+      }
+
+      // 5. Save everything
+      await ref.set({
+        pdfUrl: latest.url,
+        month: `${latest.month} ${latest.year}`,
+        monitoringDate: monitoringDate || `${latest.month} ${latest.year}`,
+        pricePerKgMin: priceMin,
+        pricePerKgMax: priceMax,
+        raw11kgMin: finalMin,
+        raw11kgMax: finalMax,
+        lastChecked: monitoringDate,
       });
 
-      const snapshot = await db.collection("products").where("srpLinked", "==", true).get();
-      const batch = db.batch();
-      snapshot.forEach(doc => batch.update(doc.ref, { priceMin, priceMax, lastDOEUpdate: admin.firestore.FieldValue.serverTimestamp() }));
-      await batch.commit();
-
-      logger.log(`Updated ${snapshot.size} products with DOE LPG prices.`);
-    } catch (error) {
-      logger.error("checkDOEArticles error:", error);
+      // 6. Update products
+      const snap = await db.collection("products").where("srpLinked", "==", true).get();
+      if (!snap.empty) {
+        const batch = db.batch();
+        snap.docs.forEach(d => {
+          batch.update(d.ref, {
+            priceMin,
+            priceMax,
+            lastDOEUpdate: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        });
+        await batch.commit();
+        logger.log(`SUCCESS → Updated ${snap.size} products to ₱${priceMin}–₱${priceMax}/kg (from ₱${finalMin}–₱${finalMax}/11kg)`);
+      }
+    } catch (err) {
+      logger.error("checkDOEArticles failed:", err);
+      throw err;
     }
   }
 );
